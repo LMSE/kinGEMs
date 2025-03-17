@@ -5,6 +5,7 @@ This module provides functions for loading models, mapping metabolites, retrievi
 protein sequences, and preparing model data for kinetic analysis.
 """
 
+import logging
 import os
 import re
 from urllib.parse import quote
@@ -12,20 +13,18 @@ from urllib.request import urlopen
 
 from bioservices import UniProt
 import cobra
-from cobra.core import Gene, Reaction
+from cobra.core import Reaction
 from cobra.util.solver import set_objective
 import numpy as np
 import pandas as pd
 import pubchempy as pcp
+import urllib
 
 from .config import (
-    BIGG_METABOLITES,
     CHEBI_COMPOUNDS,
     CHEBI_INCHI,
     METANETX_COMPOUNDS,
-    METANETX_DEPR,
     METANETX_XREF,
-    SEED_ALIASES,
     SEED_COMPOUNDS,
     TAXONOMY_IDS,
     BiGG_MAPPING,
@@ -188,10 +187,10 @@ def map_metabolites(substrate_df, external_db_dir=None):
     
     # Load database files
     BiGG_comps = pd.read_csv(BiGG_MAPPING)
-    CHEBI_comps = pd.read_csv(CHEBI_COMPOUNDS, sep='\t')
+    CHEBI_comps = pd.read_csv(CHEBI_COMPOUNDS, sep='\t')  # noqa: F841
     CHEBIInChI_comps = pd.read_csv(CHEBI_INCHI, sep='\t')
     MetaNetX_comps = pd.read_csv(METANETX_COMPOUNDS, sep='\t')
-    MetaNetX_refcomps = pd.read_csv(METANETX_XREF, sep='\t')
+    MetaNetX_refcomps = pd.read_csv(METANETX_XREF, sep='\t')  # noqa: F841
     SEED_comps = pd.read_csv(SEED_COMPOUNDS, sep='\t')
     
     # Initialize new columns
@@ -395,7 +394,9 @@ def get_SMILES_from_cactus(name):
         url = 'http://cactus.nci.nih.gov/chemical/structure/' + quote(name) + '/smiles' 
         cmpd_smiles = urlopen(url).read().decode('utf8') 
         return cmpd_smiles 
-    except: 
+    except Exception as e: 
+        # Logging is crucial for debugging
+        logging.warning(f"Failed to retrieve SMILES for {name}: {e}")
         return None
 
 def get_PubChem_SMILES(name):
@@ -419,7 +420,17 @@ def get_PubChem_SMILES(name):
         compounds = pcp.get_compounds(name, 'name')
         smiles = [compound.isomeric_smiles for compound in compounds]
         return smiles
-    except:
+    except pcp.PubChemHTTPError as http_err:
+        # Handle specific PubChem HTTP errors
+        logging.warning(f"PubChem HTTP error for {name}: {http_err}")
+        return None
+    except pcp.PubChemTypeError as type_err:
+        # Handle errors related to incorrect input type
+        logging.warning(f"PubChem type error for {name}: {type_err}")
+        return None
+    except Exception as e:
+        # Catch any other unexpected errors
+        logging.error(f"Unexpected error retrieving SMILES for {name}: {e}", exc_info=True)
         return None
 
 def retrieve_sequences(model, organism, output_path=None):
@@ -462,14 +473,55 @@ def retrieve_sequences(model, organism, output_path=None):
         return genes
     
     def get_UniProt_sequence(gene):
-        """Query UniProt for gene sequence."""
+        """
+        Query UniProt for gene sequence.
+        
+        Parameters
+        ----------
+        gene : str
+            Gene name to query
+        
+        Returns
+        -------
+        str or None
+            Protein sequence if found, None otherwise
+        """
+        if not gene:
+            return None
+        
         try:
             query = f"gene_exact:({gene}) AND taxonomy_id:({taxon_ID})"
             result = service.search(query, frmt="fasta")
+            
+            # Validate result
+            if not result:
+                logging.warning(f"No sequence found for gene {gene}")
+                return None
+            
+            # Extract sequence from FASTA format
             sequence = result.split("\n", 1)[-1]
-            sequence = sequence.replace("\n", "")
-            return sequence.strip()
-        except:
+            sequence = sequence.replace("\n", "").strip()
+            
+            # Additional validation
+            if not sequence:
+                logging.warning(f"Empty sequence retrieved for gene {gene}")
+                return None
+            
+            return sequence
+        
+        except urllib.error.URLError as url_err:
+            # Network-related errors
+            logging.warning(f"Network error retrieving sequence for {gene}: {url_err}")
+            return None
+        
+        except AttributeError as attr_err:
+            # Potential issues with service or method
+            logging.error(f"Attribute error for gene {gene}: {attr_err}", exc_info=True)
+            return None
+        
+        except Exception as e:
+            # Catch any other unexpected errors
+            logging.error(f"Unexpected error retrieving sequence for {gene}: {e}", exc_info=True)
             return None
     
     # Create dataframe with all genes
