@@ -861,8 +861,11 @@ def merge_substrate_sequences(substrate_df, sequences_df, model, output_path=Non
     merged_df = merged_df.rename(columns={
         'Reaction': 'Reactions', 
         'Sequence': 'SEQ',
-        'Substrate partner': 'Reaction_partners'
+        'Substrate partner': 'Reaction_partners',
+        'SMILES': 'CMPD_SMILES'
     })
+
+    merged_df['kcat'] = np.random.random(len(merged_df))
     
     # Save if output path provided
     if output_path:
@@ -871,7 +874,7 @@ def merge_substrate_sequences(substrate_df, sequences_df, model, output_path=Non
     
     return merged_df
 
-def process_kcat_predictions(merged_df, fold_csv_paths, output_path=None):
+def process_kcat_predictions(merged_df, predictions_csv_path, output_path=None):
     """
     Process k-fold predictions for kcat values and merge with substrate-sequence data.
     
@@ -879,8 +882,9 @@ def process_kcat_predictions(merged_df, fold_csv_paths, output_path=None):
     ----------
     merged_df : pandas.DataFrame
         DataFrame with substrates and sequences from merge_substrate_sequences
-    fold_csv_paths : list
-        List of paths to the 5 CSV files containing kcat predictions for each fold
+    predictions_csv_path : str
+        Path to the CSV file containing kcat predictions for all folds in separate columns
+        (pred_value_0, pred_value_1, pred_value_2, pred_value_3, pred_value_4)
     output_path : str, optional
         Path to save the processed data
         
@@ -890,16 +894,15 @@ def process_kcat_predictions(merged_df, fold_csv_paths, output_path=None):
         Processed dataframe with merged predictions and statistics
     """
     import os
-
     import numpy as np
     import pandas as pd
     
     # Validate inputs
-    if len(fold_csv_paths) != 5:
-        raise ValueError(f"Expected 5 fold CSV files, got {len(fold_csv_paths)}")
+    if not os.path.exists(predictions_csv_path):
+        raise FileNotFoundError(f"Predictions CSV file not found: {predictions_csv_path}")
     
     # Make sure required columns exist in merged_df
-    required_cols = ['SMILES', 'SEQ']
+    required_cols = ['CMPD_SMILES', 'SEQ']
     missing_cols = [col for col in required_cols if col not in merged_df.columns]
     if missing_cols:
         raise ValueError(f"Missing required columns in merged_df: {missing_cols}")
@@ -907,37 +910,20 @@ def process_kcat_predictions(merged_df, fold_csv_paths, output_path=None):
     # Create a deep copy to avoid modifying the original dataframe
     result_df = merged_df.copy()
     
-    # Load each fold prediction and prepare for merging
-    fold_dfs = []
-    for i, csv_path in enumerate(fold_csv_paths):
-        if not os.path.exists(csv_path):
-            raise FileNotFoundError(f"Fold CSV file not found: {csv_path}")
-        
-        # Load the fold CSV
-        fold_df = pd.read_csv(csv_path)
-        
-        # Ensure the fold CSV has the required columns
-        for col in ['SMILES', 'SEQ', 'kcat']:
-            if col not in fold_df.columns:
-                raise ValueError(f"Missing column '{col}' in fold CSV: {csv_path}")
-        
-        # Rename kcat column to include fold number
-        fold_df = fold_df.rename(columns={'kcat': f'kcat_fold_{i+1}'})
-        
-        # Keep only necessary columns
-        fold_df = fold_df[['SMILES', 'SEQ', f'kcat_fold_{i+1}']]
-        
-        fold_dfs.append(fold_df)
+    # Load the predictions CSV
+    predictions_df = pd.read_csv(predictions_csv_path)
     
-    # Merge with the first fold
-    result_df = pd.merge(result_df, fold_dfs[0], on=['SMILES', 'SEQ'], how='left')
+    # Ensure the predictions CSV has the required columns
+    required_pred_cols = ['CMPD_SMILES', 'SEQ'] + [f'pred_value_{i}' for i in range(5)]
+    missing_pred_cols = [col for col in required_pred_cols if col not in predictions_df.columns]
+    if missing_pred_cols:
+        raise ValueError(f"Missing required columns in predictions CSV: {missing_pred_cols}")
     
-    # Merge with the remaining folds
-    for i in range(1, 5):
-        result_df = pd.merge(result_df, fold_dfs[i], on=['SMILES', 'SEQ'], how='left')
+    # Merge with the predictions
+    result_df = pd.merge(result_df, predictions_df, on=['CMPD_SMILES', 'SEQ'], how='left')
     
     # Calculate statistics across the folds
-    kcat_cols = [f'kcat_fold_{i+1}' for i in range(5)]
+    kcat_cols = [f'pred_value_{i}' for i in range(5)]
     
     # Calculate mean kcat (average of the 5 folds)
     result_df['kcat_mean'] = result_df[kcat_cols].mean(axis=1)
