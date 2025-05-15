@@ -971,3 +971,69 @@ def process_merged_data_with_folds(merged_df, fold_csv_paths, output_path=None):
     result_df = process_kcat_predictions(merged_df, fold_csv_paths, output_path)
     
     return result_df
+
+def assign_kcats_to_model(model, df_new):
+    """
+    Assign kcat values from df_new to the corresponding reactions in the model.
+    Each reaction will receive a `.kcats` attribute that maps genes to kcat values.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The COBRA model to annotate
+    df_new : pandas.DataFrame
+        DataFrame containing columns: ['Reactions', 'Single_gene', 'kcat_mean']
+
+    Returns
+    -------
+    cobra.Model
+        The same model object with .kcats added to reactions
+    """
+    from collections import defaultdict
+
+    kcats_by_reaction = defaultdict(dict)
+
+    for _, row in df_new.iterrows():
+        rxn_id = row['Reactions']
+        gene_id = row['Single_gene']
+        kcat = row['kcat_mean']
+        if pd.notna(kcat):
+            kcats_by_reaction[rxn_id][gene_id] = kcat
+
+    for rxn_id, gene_kcats in kcats_by_reaction.items():
+        try:
+            reaction = model.reactions.get_by_id(rxn_id)
+            reaction.kcats = gene_kcats  # Attach as a custom attribute
+        except KeyError:
+            print(f"Warning: Reaction {rxn_id} not found in model.")
+
+    return model
+
+def format_kcats_like_gpr(reaction):
+    """
+    Return a GPR-style string representation of the kcats assigned to a reaction.
+
+    Parameters
+    ----------
+    reaction : cobra.Reaction
+        The reaction object with a `.kcats` dictionary attribute
+
+    Returns
+    -------
+    str
+        A string that mirrors the GPR rule but shows kcat values instead of gene names
+    """
+    if not hasattr(reaction, 'kcats') or not reaction.kcats:
+        return "No kcats assigned"
+
+    gpr = reaction.gene_reaction_rule
+    if not gpr:
+        return "No GPR rule"
+
+    formatted = gpr
+
+    for gene, kcat in reaction.kcats.items():
+        formatted = formatted.replace(gene, f"{kcat:.2e}")
+
+    return formatted
+

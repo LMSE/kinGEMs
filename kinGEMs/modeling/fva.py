@@ -6,154 +6,125 @@ with enzyme constraints, allowing exploration of the solution space.
 """
 
 import os
+
 import pandas as pd
-import cobra as cb
+
 from ..config import ensure_dir_exists
 
-def flux_variability_analysis(model, kcat_dict, biomass_reaction, gene_sequence_file, 
-                            output_file=None, enzyme_upper_bound=0.125, enzyme_ratio=True,
-                            multi_enzyme_off=False, isoenzymes_off=False, 
-                            promiscuous_off=False, complexes_off=False):
+
+def flux_variability_analysis(model, processed_df, biomass_reaction,
+                               output_file=None, enzyme_upper_bound=0.125, enzyme_ratio=True,
+                               multi_enzyme_off=False, isoenzymes_off=False,
+                               promiscuous_off=False, complexes_off=False):
     """
-    Perform Flux Variability Analysis with enzyme constraints.
-    
-    FVA calculates the minimum and maximum possible flux values through each
-    reaction in the model while maintaining the optimal objective value.
+    Perform Flux Variability Analysis (FVA) using enzyme-constrained optimization
+    with kcat values from a processed dataframe.
     
     Parameters
     ----------
-    model : cobra.Model or str
-        COBRA model object or path to the model file
-    kcat_dict : dict or str
-        Dictionary of kcat values or path to kcat CSV file
+    model : cobra.Model
+        COBRA model object
+    processed_df : pandas.DataFrame
+        DataFrame with kcat_mean, SEQ, Reactions, Single_gene
     biomass_reaction : str
-        ID of the biomass reaction to be fixed
-    gene_sequence_file : str
-        Path to file containing gene sequences
+        ID of the biomass reaction
     output_file : str, optional
-        Path to save results
+        File path to save FVA results
     enzyme_upper_bound : float, optional
-        Upper bound for total enzyme concentration
+        Enzyme pool constraint
     enzyme_ratio : bool, optional
-        Whether to use enzyme ratio constraint
-    multi_enzyme_off : bool, optional
-        Whether to disable multi-enzyme reactions
-    isoenzymes_off : bool, optional
-        Whether to disable isoenzyme handling
-    promiscuous_off : bool, optional
-        Whether to disable promiscuous enzyme handling
-    complexes_off : bool, optional
-        Whether to disable enzyme complex handling
+        Whether to apply enzyme ratio constraint
+    multi_enzyme_off, isoenzymes_off, promiscuous_off, complexes_off : bool
+        Logic switches for model complexity
         
     Returns
     -------
     tuple
-        (df_FVA_solution, kcat_dict, df_FBA)
+        (df_FVA_solution, processed_df, df_FBA)
     """
-    # Import here to avoid circular imports
-    from .optimize import run_optimization
-    
-    # Model handling
-    if isinstance(model, str):
-        directory = os.path.dirname(__file__)
-        model_path = os.path.join(directory, model)
-        model_obj = cb.io.read_sbml_model(model_path)
-    else:
-        model_obj = model
-        
-    # Run initial optimization to get optimal biomass value
-    solution_biomass, df_FBA, gene_seq_dict = run_optimization(
-        model_obj,
-        kcat_dict,
-        biomass_reaction,
-        gene_sequence_file,
+    from .optimize import run_optimization_with_dataframe
+
+    print("=== Starting FVA with enzyme constraints ===")
+
+    # Step 1: Run optimization to get baseline biomass
+    solution_biomass, df_FBA, _, _ = run_optimization_with_dataframe(
+        model=model,
+        processed_df=processed_df,
+        objective_reaction=biomass_reaction,
         enzyme_upper_bound=enzyme_upper_bound,
         enzyme_ratio=enzyme_ratio,
         multi_enzyme_off=multi_enzyme_off,
         isoenzymes_off=isoenzymes_off,
         promiscuous_off=promiscuous_off,
-        complexes_off=complexes_off
+        complexes_off=complexes_off,
+        maximization=True,
+        save_results=False
     )
-    
-    print('Optimal solution biomass:', solution_biomass)
-     
-    # Get all reaction IDs for FVA
-    reactions = list(set(reaction.id for reaction in model_obj.reactions))
-    
-    # Set biomass reaction to fixed value from the optimization
-    biomass_rxn = model_obj.reactions.get_by_id(biomass_reaction)
+
+    print(f"Optimal biomass: {solution_biomass:.6f}")
+
+    # Step 2: Fix biomass value
+    biomass_rxn = model.reactions.get_by_id(biomass_reaction)
     biomass_rxn.lower_bound = solution_biomass
     biomass_rxn.upper_bound = solution_biomass
-    
-    # Arrays to store results
-    max_solutions = []
-    min_solutions = []
-    max_solutions_rxn = [] 
-    min_solutions_rxn = [] 
-    
-    # Perform FVA for each reaction
-    for i, rxn in enumerate(reactions):
-        print(f'Starting FVA with reaction {rxn} ({i+1}/{len(reactions)})')
-        print("-------------------------------------------------------")
-        
-        # Maximize flux through the reaction
-        print("Now starting maximization LP....")
-        solution_max, _, _ = run_optimization(
-            model_obj,
-            kcat_dict,
-            rxn,
-            gene_sequence_file,
+
+    # Step 3: Run FVA
+    min_fluxes = []
+    max_fluxes = []
+    reaction_ids = []
+
+    for i, rxn in enumerate(model.reactions):
+        print(f"[{i + 1}/{len(model.reactions)}] FVA for: {rxn.id}")
+
+        # Maximize this reaction
+        flux_max, _, _, _ = run_optimization_with_dataframe(
+            model=model,
+            processed_df=processed_df,
+            objective_reaction=rxn.id,
             enzyme_upper_bound=enzyme_upper_bound,
             enzyme_ratio=enzyme_ratio,
             multi_enzyme_off=multi_enzyme_off,
             isoenzymes_off=isoenzymes_off,
             promiscuous_off=promiscuous_off,
             complexes_off=complexes_off,
-            maximization=True
+            maximization=True,
+            save_results=False
         )
-        
-        max_solutions.append(solution_max)    
-        max_solutions_rxn.append(i)
-        
-        # Minimize flux through the reaction
-        print("Now starting minimization LP....")
-        solution_min, _, _ = run_optimization(
-            model_obj,
-            kcat_dict,
-            rxn,
-            gene_sequence_file,
+
+        # Minimize this reaction
+        flux_min, _, _, _ = run_optimization_with_dataframe(
+            model=model,
+            processed_df=processed_df,
+            objective_reaction=rxn.id,
             enzyme_upper_bound=enzyme_upper_bound,
             enzyme_ratio=enzyme_ratio,
             multi_enzyme_off=multi_enzyme_off,
             isoenzymes_off=isoenzymes_off,
             promiscuous_off=promiscuous_off,
             complexes_off=complexes_off,
-            maximization=False
+            maximization=False,
+            save_results=False
         )
-        
-        min_solutions.append(solution_min)   
-        min_solutions_rxn.append(i)
-        
-        print(f"Reaction {rxn} FVA now complete.")
-        print("_____________________________________")
-    
-    # Compile results into a dataframe
-    data = {
-        'Reactions': reactions,
-        'Min Solutions': min_solutions,
-        'Max Solutions': max_solutions,
-        'Solution Biomass': [solution_biomass] * len(reactions)
-    }
-    df_FVA_solution = pd.DataFrame(data)
-    
-    # Save results if output file specified
+
+        reaction_ids.append(rxn.id)
+        max_fluxes.append(flux_max)
+        min_fluxes.append(flux_min)
+
+    # Step 4: Compile results
+    df_FVA_solution = pd.DataFrame({
+        "Reactions": reaction_ids,
+        "Min Solutions": min_fluxes,
+        "Max Solutions": max_fluxes,
+        "Solution Biomass": [solution_biomass] * len(reaction_ids)
+    })
+
     if output_file:
-        directory = os.path.dirname(__file__)
-        output_path = os.path.join(directory, output_file)
-        ensure_dir_exists(os.path.dirname(output_path))
-        df_FVA_solution.to_csv(output_path)
-    
-    return df_FVA_solution, kcat_dict, df_FBA
+        ensure_dir_exists(os.path.dirname(output_file))
+        df_FVA_solution.to_csv(output_file, index=False)
+        print(f"FVA results saved to: {output_file}")
+
+    return df_FVA_solution, processed_df, df_FBA
+
 
 def calculate_flux_ranges(fva_results):
     """
@@ -261,9 +232,9 @@ def compare_fva_results(fva_result1, fva_result2, name1='Model 1', name2='Model 
     )
     
     # Calculate differences
-    comparison[f'Min_Diff'] = comparison[f'Min Solutions_{name2}'] - comparison[f'Min Solutions_{name1}']
-    comparison[f'Max_Diff'] = comparison[f'Max Solutions_{name2}'] - comparison[f'Max Solutions_{name1}']
-    comparison[f'Range_Diff'] = comparison[f'Flux Range_{name2}'] - comparison[f'Flux Range_{name1}']
+    comparison['Min_Diff'] = comparison[f'Min Solutions_{name2}'] - comparison[f'Min Solutions_{name1}']
+    comparison['Max_Diff'] = comparison[f'Max Solutions_{name2}'] - comparison[f'Max Solutions_{name1}']
+    comparison['Range_Diff'] = comparison[f'Flux Range_{name2}'] - comparison[f'Flux Range_{name1}']
     
     # Save results if output file specified
     if output_file:
@@ -345,3 +316,102 @@ def plot_flux_variability(fva_results, reactions=None, figsize=(12, 8), output_f
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
     
     return fig
+
+def plot_cumulative_fvi_distribution(dfs, labels, output_file=None, roboto_font=None):
+    """
+    Plot cumulative distributions of Flux Variability Index (FVi) for multiple FVA result sets.
+    
+    Parameters
+    ----------
+    dfs : list of pd.DataFrame
+        List of FVA result dataframes.
+    labels : list of str
+        Labels corresponding to each dataframe.
+    output_file : str, optional
+        Path to save the plot.
+    roboto_font : font manager or None
+        Optional custom font (e.g., matplotlib.font_manager.FontProperties)
+    
+    Returns
+    -------
+    None
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    fig, ax1 = plt.subplots(figsize=(12, 8), dpi=300)
+    ax2 = ax1.twinx()
+
+    percentages = []
+    fvi_at_0_5 = []
+
+    for df, label in zip(dfs, labels):
+        # Separate forward and reverse reactions
+        reverse_rows = df[df['Reactions'].str.endswith('_reverse')].copy()
+        normal_rows = df[~df['Reactions'].str.endswith('_reverse')].copy()
+        reverse_rows['Reactions'] = reverse_rows['Reactions'].str.replace('_reverse', '', regex=False)
+
+        combined_df = pd.merge(
+            normal_rows,
+            reverse_rows,
+            on='Reactions',
+            how='left',
+            suffixes=('', '_Reverse')
+        )
+
+        def calculate_fvi(row):
+            if pd.isna(row['Max Solutions']):
+                return np.nan
+            elif pd.isna(row['Max Solutions_Reverse']) or pd.isna(row['Min Solutions_Reverse']):
+                return abs(row['Max Solutions'] - row['Min Solutions'])
+            else:
+                return abs((row['Max Solutions'] - row['Min Solutions']) -
+                           (row['Max Solutions_Reverse'] - row['Min Solutions_Reverse']))
+
+        combined_df['FVi'] = combined_df.apply(calculate_fvi, axis=1)
+        fvi_values = combined_df['FVi'].dropna()
+        fvi_values = fvi_values[fvi_values >= 1e-6]
+
+        sorted_fvi = np.sort(fvi_values)
+        cumulative = np.arange(1, len(sorted_fvi) + 1) / len(sorted_fvi)
+
+        ax1.plot(sorted_fvi, cumulative, label=label, linewidth=3)
+
+        biomass_value = df['Solution Biomass'].iloc[0] if 'Solution Biomass' in df.columns else 0.0
+        fvi_50 = np.interp(0.5, cumulative, sorted_fvi) if len(sorted_fvi) > 0 else np.nan
+        fvi_at_0_5.append((label, fvi_50))
+
+        ax2.plot([fvi_values.min(), fvi_values.max()],
+                 [biomass_value, biomass_value],
+                 linestyle='--', color=ax1.lines[-1].get_color(), linewidth=2, alpha=0.6)
+
+        percent_above_990 = (fvi_values > 990).mean() * 100
+        percentages.append((label, percent_above_990))
+
+    print("Percent of reactions with FVi > 990:")
+    for label, pct in percentages:
+        print(f"  {label}: {pct:.2f}%")
+
+    print("\nFVi at cumulative probability = 0.5:")
+    for label, val in fvi_at_0_5:
+        print(f"  {label}: {val:.4f}")
+
+    ax1.axhline(0.5, color='gray', linestyle='--', linewidth=1.5)
+
+    ax1.set_xscale('log')
+    ax1.set_xlim(1e-6, 1e3)
+    ax1.set_ylim(0, 1)
+    ax1.set_xlabel('Flux Variability Range (FVi)', fontsize=16, fontproperties=roboto_font)
+    ax1.set_ylabel('Cumulative Probability', fontsize=16, fontproperties=roboto_font)
+    ax2.set_ylabel('Biomass (1/hr)', fontsize=16, fontproperties=roboto_font)
+
+    ax1.tick_params(axis='both', labelsize=14)
+    ax2.tick_params(axis='y', labelsize=14)
+
+    ax1.legend(loc='lower center', bbox_to_anchor=(0.5, -0.25), ncol=2, fontsize=12, prop=roboto_font)
+    plt.tight_layout()
+
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+
+    plt.show()

@@ -1,0 +1,520 @@
+Variable,Index,Value
+reaction,ACKr_reverse,491.48640486031303
+reaction,SUCOAS,491.0862777512208
+reaction,EX_h_e,444.6254463717276
+reaction,ATPM,8.390000117596744
+reaction,SUCCt2_2,9.420227411942958e-07
+reaction,ME1,4.846830555796161e-07
+reaction,EX_mal__L_e,0.0
+reaction,ENO,491.57713070780477
+reaction,GAPD_reverse,490.57622008796955
+reaction,GLUt2r_reverse,491.08558099762547
+reaction,EX_h2o_e,445.8973445114369
+reaction,GLUDy,491.03601929375884
+reaction,ACONTb,491.0944720571464
+reaction,ADK1_reverse,491.00740689184937
+reaction,PIt2r_reverse,490.95677494033407
+reaction,ETOHt2r_reverse,491.0847309152533
+reaction,EX_co2_e,445.82853669273135
+reaction,PFK,0.12102983776388505
+reaction,EX_ac_e,0.7829899688937068
+reaction,EX_fum_e,0.0
+reaction,RPE,491.8592814328107
+reaction,EX_nh4_e_reverse,444.0184333371184
+reaction,RPE_reverse,490.3021419632093
+reaction,NH4t,491.1362329847841
+reaction,GLUSy,3.237901392181168e-07
+reaction,PGK,490.5758490298759
+reaction,D_LACt2,491.0832983937129
+reaction,ACALDt_reverse,491.0854481264975
+reaction,ACt2r,490.70341488173614
+reaction,ACKr,490.70341488141963
+reaction,LDH_D,491.0832983940364
+reaction,EX_fru_e_reverse,0.0
+reaction,FRD7,2.37422131851094e-07
+reaction,GLNS,0.004729239823783012
+reaction,PGM,490.5898913511518
+reaction,TPI_reverse,491.02266240120673
+reaction,FUM_reverse,491.0857596475148
+reaction,CO2t,489.5039308368051
+reaction,ACONTb_reverse,491.0745185388702
+reaction,PIt2r,491.0248065109937
+reaction,EX_lac__D_e,1.1369233153272864e-06
+reaction,ETOHt2r,491.0847303502254
+reaction,FORt,0.0
+reaction,PGI_reverse,491.81274897365176
+reaction,O2t,492.6777394118554
+reaction,THD2,7.877441957462521e-07
+reaction,GLNabc,0.0
+reaction,FBP,1.3470277621102322e-07
+reaction,EX_glc__D_e,6.888789495310807
+reaction,PGI,490.3779503972453
+reaction,CO2t_reverse,492.6987924934324
+reaction,EX_gln__L_e,0.0
+reaction,EX_o2_e,442.16135596337386
+reaction,EX_glc__D_e_reverse,7.813430819332237
+reaction,ATPS4r_reverse,487.2322740974894
+reaction,ENO_reverse,490.5898913515411
+reaction,EX_mal__L_e_reverse,0.0
+reaction,AKGDH,1.530234165710968e-07
+reaction,GND,2.355648758996143
+reaction,EX_pi_e_reverse,444.0038367746941
+reaction,FBA_reverse,491.0226624015148
+reaction,EX_glu__L_e,1.5420836687612245e-07
+reaction,MDH,491.08854776300865
+reaction,FRUpts2,0.0
+reaction,ACONTa,491.09447205642016
+reaction,O2t_reverse,489.5042577634125
+reaction,H2Ot_reverse,492.76313461178836
+reaction,PGK_reverse,491.5907544719053
+reaction,PPC,0.052996003624010614
+reaction,GLUDy_reverse,491.13213105215334
+reaction,TKT2,491.4722863633961
+reaction,PPCK,3.492925803728425e-07
+reaction,ACONTa_reverse,491.074518538144
+reaction,EX_for_e_reverse,0.0
+reaction,EX_h2o_e_reverse,442.56776820962375
+reaction,RPI_reverse,491.48334651061793
+reaction,PYRt2,491.0843931195832
+reaction,EX_fum_e_reverse,0.0
+reaction,PGL,2.355648758996143
+reaction,ACALD,491.08261572031864
+reaction,EX_lac__D_e_reverse,0.0
+reaction,AKGt2r_reverse,491.0096622113835
+reaction,ALCD2x_reverse,491.08351282023705
+reaction,D_LACt2_reverse,491.0832995406359
+reaction,EX_akg_e_reverse,0.0
+reaction,EX_acald_e_reverse,0.0
+reaction,CYTBD,6.346963296885787
+reaction,PGM_reverse,491.57713070741545
+reaction,PDH,0.8722544739039324
+reaction,SUCOAS_reverse,491.0862779042442
+reaction,MALt2_2,0.0
+reaction,ME2,4.5051904938458936e-07
+reaction,TALA,491.4754826549987
+reaction,SUCCt3,1.223536544856058e-06
+reaction,MDH_reverse,491.0885477898141
+reaction,TKT1,491.475482652629
+reaction,NADTRHD,4.394209851906092
+reaction,ACALDt,491.08544771595604
+reaction,GAPD,491.591125529999
+reaction,EX_gln__L_e_reverse,0.0
+reaction,ATPS4r,495.0562245092028
+reaction,NADH16,6.3469628969331335
+reaction,EX_h_e_reverse,443.47147583015266
+reaction,FBA,491.14369210457596
+reaction,GLUt2r,491.0855808334174
+reaction,EX_pi_e,443.93580520403447
+reaction,EX_acald_e,4.005417514500266e-07
+reaction,EX_fru_e,0.0
+reaction,SUCDi,6.373747850544701e-07
+reaction,ICDHyr_reverse,491.07516384625933
+reaction,EX_o2_e_reverse,445.3348376118168
+reaction,ALCD2x,491.08351225520914
+reaction,ADK1,491.0074071916529
+reaction,GLCpts,0.9246413240214306
+reaction,ACALD_reverse,491.08261669588796
+reaction,TKT1_reverse,490.69357486403106
+reaction,H2Ot,489.43355830997524
+reaction,MALS,5.284430335715019e-07
+reaction,EX_pyr_e_reverse,0.0
+reaction,EX_akg_e,1.5264741496771494e-07
+reaction,FUMt2_2,0.0
+reaction,BIOMASS_Ecoli_core_w_GAM,0.018493372838134313
+reaction,CS,0.019953518276155244
+reaction,LDH_D_reverse,491.0832995409594
+reaction,FUM,491.085760037468
+reaction,EX_etoh_e,5.550281785361042e-07
+reaction,ICL,5.28443033316985e-07
+reaction,TKT2_reverse,490.6970546823927
+reaction,PPS,2.998035009027778e-07
+reaction,ICDHyr,491.0951168360925
+reaction,PFL,0.0
+reaction,PYRt2_reverse,491.0843942094737
+reaction,EX_for_e,0.0
+reaction,EX_succ_e_reverse,0.0
+reaction,PTAr,491.4864048606291
+reaction,PYK,2.777873507705666e-06
+reaction,EX_succ_e,2.715141048048268e-07
+reaction,GLUN,1.5059941820629608e-07
+reaction,ACt2r_reverse,491.48640486062953
+reaction,EX_nh4_e,443.91759248949944
+reaction,NH4t_reverse,491.03539213716516
+reaction,PTAr_reverse,490.7034148817357
+reaction,G6PDH2r,492.2535107490431
+reaction,EX_ac_e_reverse,0.0
+reaction,AKGt2r,491.0096620487364
+reaction,EX_co2_e_reverse,442.6336750361041
+reaction,G6PDH2r_reverse,489.8978619900469
+reaction,EX_glu__L_e_reverse,0.0
+reaction,FORt2,0.0
+reaction,EX_etoh_e_reverse,0.0
+reaction,RPI,490.6848372212232
+reaction,TALA_reverse,490.69357486640075
+reaction,EX_pyr_e,1.0798908755434882e-06
+reaction,TPI,491.14369210426787
+enzyme,b2415,0.0
+enzyme,b2465,0.0
+enzyme,b3603,0.0
+enzyme,b2283,0.00015156811427046764
+enzyme,b0114,5.447386508194747e-05
+enzyme,b3213,0.0
+enzyme,b0008,0.0
+enzyme,b2914,0.0
+enzyme,b3114,0.0
+enzyme,b2587,0.0
+enzyme,b3952,0.0
+enzyme,b0734,3.396391343032437e-05
+enzyme,b1817,0.0
+enzyme,b1818,0.0
+enzyme,b1723,2.2480690702067015e-05
+enzyme,b4151,0.0
+enzyme,b2281,0.00024617137758862047
+enzyme,b2416,0.0
+enzyme,b4153,0.0
+enzyme,b0755,0.0
+enzyme,b4154,0.0
+enzyme,b1136,0.0
+enzyme,b4025,0.0
+enzyme,b2029,1.4412766661018526e-05
+enzyme,b2288,6.59797428766697e-05
+enzyme,b4077,0.0
+enzyme,b3493,0.0
+enzyme,b0978,0.00011773149233230718
+enzyme,b3919,0.0
+enzyme,b0979,0.00034986120712595303
+enzyme,b0726,0.0
+enzyme,b1612,0.0
+enzyme,b0767,8.372782576026917e-05
+enzyme,b2097,0.0
+enzyme,b1602,0.0
+enzyme,b2282,0.00032994911390888017
+enzyme,b2935,0.0
+enzyme,b4301,0.0
+enzyme,b2579,0.0
+enzyme,b3731,0.0
+enzyme,b4122,0.0
+enzyme,b0720,1.4189173241898026e-07
+enzyme,s0001,0.0
+enzyme,b1773,0.0
+enzyme,b1702,0.0
+enzyme,b2458,0.0
+enzyme,b1621,4.098928861301342e-05
+enzyme,b1241,0.0
+enzyme,b3738,0.0
+enzyme,b1849,0.0
+enzyme,b1779,0.0
+enzyme,b1819,0.0
+enzyme,b0811,0.0
+enzyme,b4014,0.0
+enzyme,b1276,0.0
+enzyme,b3962,5.565237901070609e-06
+enzyme,b2280,0.00022080744852367865
+enzyme,b2287,0.0001498940546758104
+enzyme,b3925,0.0
+enzyme,b0810,0.0
+enzyme,b2296,0.0
+enzyme,b1524,0.0
+enzyme,b1297,9.979832393801111e-08
+enzyme,b1852,0.0
+enzyme,b3403,0.0
+enzyme,b2779,0.0
+enzyme,b3737,0.0
+enzyme,b3733,0.0
+enzyme,b1854,0.0
+enzyme,b3951,0.0
+enzyme,b0356,0.0
+enzyme,b3212,0.0
+enzyme,b0904,0.0
+enzyme,b4395,0.0
+enzyme,b3870,8.215048037050178e-08
+enzyme,b4152,0.0
+enzyme,b0451,0.0
+enzyme,b0723,0.0
+enzyme,b0721,0.0
+enzyme,b0875,0.0
+enzyme,b2285,0.00014627720001367885
+enzyme,b0728,0.0
+enzyme,b3386,0.0
+enzyme,b2279,9.931110442406596e-05
+enzyme,b3528,0.0
+enzyme,b2463,0.0
+enzyme,b2417,0.00010897167662734298
+enzyme,b1812,0.0
+enzyme,b2284,8.395959462180693e-05
+enzyme,b0733,4.756345321199199e-05
+enzyme,b4232,0.0
+enzyme,b2276,0.00015799652434126437
+enzyme,b1478,0.0
+enzyme,b0902,0.0
+enzyme,b2976,0.0
+enzyme,b2926,0.0
+enzyme,b0351,0.0
+enzyme,b0116,0.0
+enzyme,b0115,2.00727408927497e-05
+enzyme,b0729,0.0
+enzyme,b1611,0.0
+enzyme,b2492,0.0
+enzyme,b0809,0.0
+enzyme,b3236,0.0
+enzyme,b3612,0.0
+enzyme,b1101,0.00010658705689584794
+enzyme,b3734,0.0
+enzyme,b2987,0.0
+enzyme,b1676,0.0
+enzyme,b3735,0.0
+enzyme,b2278,5.262115372219288e-05
+enzyme,b0485,0.0
+enzyme,b1479,0.0
+enzyme,b4090,0.0
+enzyme,b4015,0.0
+enzyme,b0474,0.0
+enzyme,b3739,0.0
+enzyme,b3736,0.0
+enzyme,b2464,0.0
+enzyme,b3916,5.276746219367001e-05
+enzyme,b3956,6.994115869650622e-09
+enzyme,b0118,0.0
+enzyme,b2975,0.0
+enzyme,b2925,0.0
+enzyme,b2133,0.0
+enzyme,b3115,0.0
+enzyme,b0724,0.0
+enzyme,b1380,0.0
+enzyme,b2297,0.0
+enzyme,b2286,0.00013016651546167858
+enzyme,b1603,0.0
+enzyme,b0727,0.0
+enzyme,b0722,0.0
+enzyme,b1761,0.0
+enzyme,b3732,0.0
+enzyme,b0903,0.0
+enzyme,b2277,0.00010758909804157909
+enzyme_min,"('ACKr_reverse', 'b3115')",0.0
+enzyme_min,"('ATPS4r', 'b3731')",0.0
+enzyme_min,"('ACKr_reverse', 'b1849')",0.0
+enzyme_min,"('AKGt2r', 'b2587')",0.0
+enzyme_min,"('PFL', 'b0903')",0.0
+enzyme_min,"('GLUSy', 'b3212')",0.0
+enzyme_min,"('ATPS4r_reverse', 'b3737')",0.0
+enzyme_min,"('ACONTa_reverse', 'b1276')",0.0
+enzyme_min,"('SUCOAS', 'b0729')",0.0
+enzyme_min,"('ACONTa', 'b1276')",0.0
+enzyme_min,"('THD2', 'b1602')",0.0
+enzyme_min,"('NADH16', 'b2287')",0.0
+enzyme_min,"('SUCDi', 'b0723')",0.0
+enzyme_min,"('ICDHyr_reverse', 'b1136')",0.0
+enzyme_min,"('ACKr', 'b2296')",0.0
+enzyme_min,"('ENO_reverse', 'b2779')",0.0
+enzyme_min,"('FRD7', 'b4153')",0.0
+enzyme_min,"('FRD7', 'b4151')",0.0
+enzyme_min,"('ALCD2x_reverse', 'b1478')",0.0
+enzyme_min,"('FUM_reverse', 'b4122')",0.0
+enzyme_min,"('PFL', 'b3952')",0.0
+enzyme_min,"('ALCD2x_reverse', 'b0356')",0.0
+enzyme_min,"('ATPS4r_reverse', 'b3731')",0.0
+enzyme_min,"('FBA_reverse', 'b1773')",0.0
+enzyme_min,"('RPI', 'b4090')",0.0
+enzyme_min,"('GLUt2r', 'b4077')",0.0
+enzyme_min,"('H2Ot_reverse', 's0001')",0.0
+enzyme_min,"('TKT2_reverse', 'b2935')",0.0
+enzyme_min,"('ACALDt_reverse', 's0001')",0.0
+enzyme_min,"('D_LACt2_reverse', 'b3603')",0.0
+enzyme_min,"('ATPS4r', 'b3735')",0.0
+enzyme_min,"('FBP', 'b3925')",0.0
+enzyme_min,"('ENO', 'b2779')",0.0
+enzyme_min,"('SUCOAS', 'b0728')",0.0
+enzyme_min,"('NH4t', 's0001')",0.0
+enzyme_min,"('TKT1_reverse', 'b2465')",0.0
+enzyme_min,"('GAPD_reverse', 'b1779')",0.0
+enzyme_min,"('NADH16', 'b2281')",0.0
+enzyme_min,"('PYK', 'b1676')",0.0
+enzyme_min,"('SUCDi', 'b0722')",0.0
+enzyme_min,"('CYTBD', 'b0734')",0.0
+enzyme_min,"('O2t', 's0001')",0.0
+enzyme_min,"('TALA', 'b0008')",0.0
+enzyme_min,"('FBA', 'b2097')",0.0
+enzyme_min,"('PYK', 'b1854')",0.0
+enzyme_min,"('PDH', 'b0115')",0.0
+enzyme_min,"('RPI_reverse', 'b4090')",0.0
+enzyme_min,"('RPE_reverse', 'b3386')",0.0
+enzyme_min,"('PIt2r', 'b3493')",0.0
+enzyme_min,"('AKGDH', 'b0116')",0.0
+enzyme_min,"('GLNabc', 'b0809')",0.0
+enzyme_min,"('NADTRHD', 'b3962')",0.0
+enzyme_min,"('FORt', 'b0904')",0.0
+enzyme_min,"('SUCDi', 'b0724')",0.0
+enzyme_min,"('RPI_reverse', 'b2914')",0.0
+enzyme_min,"('ADK1', 'b0474')",0.0
+enzyme_min,"('GLUDy_reverse', 'b1761')",0.0
+enzyme_min,"('GLUN', 'b1524')",0.0
+enzyme_min,"('TKT2_reverse', 'b2465')",0.0
+enzyme_min,"('THD2', 'b1603')",0.0
+enzyme_min,"('GLNS', 'b1297')",0.0
+enzyme_min,"('ATPS4r', 'b3736')",0.0
+enzyme_min,"('ME1', 'b1479')",0.0
+enzyme_min,"('NADH16', 'b2280')",0.0
+enzyme_min,"('ATPS4r', 'b3738')",0.0
+enzyme_min,"('ACONTa_reverse', 'b0118')",0.0
+enzyme_min,"('ATPS4r', 'b3739')",0.0
+enzyme_min,"('ACONTa', 'b0118')",0.0
+enzyme_min,"('PTAr', 'b2297')",0.0
+enzyme_min,"('FORt2', 'b0904')",0.0
+enzyme_min,"('CO2t', 's0001')",0.0
+enzyme_min,"('NADH16', 'b2285')",0.0
+enzyme_min,"('FRUpts2', 'b2415')",0.0
+enzyme_min,"('ATPS4r', 'b3733')",0.0
+enzyme_min,"('PGM_reverse', 'b0755')",0.0
+enzyme_min,"('TKT1_reverse', 'b2935')",0.0
+enzyme_min,"('PPC', 'b3956')",0.0
+enzyme_min,"('G6PDH2r', 'b1852')",0.0
+enzyme_min,"('GLCpts', 'b1621')",0.0
+enzyme_min,"('FRD7', 'b4152')",0.0
+enzyme_min,"('LDH_D_reverse', 'b1380')",0.0
+enzyme_min,"('GLCpts', 'b2415')",0.0
+enzyme_min,"('FRUpts2', 'b2416')",0.0
+enzyme_min,"('NADH16', 'b2278')",0.0
+enzyme_min,"('PDH', 'b0116')",0.0
+enzyme_min,"('NH4t_reverse', 's0001')",0.0
+enzyme_min,"('ACALD', 'b1241')",0.0
+enzyme_min,"('GND', 'b2029')",0.0
+enzyme_min,"('GLNabc', 'b0810')",0.0
+enzyme_min,"('ME2', 'b2463')",0.0
+enzyme_min,"('D_LACt2_reverse', 'b2975')",0.0
+enzyme_min,"('ATPS4r_reverse', 'b3738')",0.0
+enzyme_min,"('ATPS4r_reverse', 'b3739')",0.0
+enzyme_min,"('TPI', 'b3919')",0.0
+enzyme_min,"('H2Ot', 'b0875')",0.0
+enzyme_min,"('NADH16', 'b2279')",0.0
+enzyme_min,"('ATPS4r_reverse', 'b3733')",0.0
+enzyme_min,"('PFL', 'b2579')",0.0
+enzyme_min,"('PGM', 'b0755')",0.0
+enzyme_min,"('FBP', 'b4232')",0.0
+enzyme_min,"('PPS', 'b1702')",0.0
+enzyme_min,"('D_LACt2', 'b3603')",0.0
+enzyme_min,"('GLCpts', 'b2416')",0.0
+enzyme_min,"('FRUpts2', 'b1819')",0.0
+enzyme_min,"('PIt2r_reverse', 'b2987')",0.0
+enzyme_min,"('CYTBD', 'b0978')",0.0
+enzyme_min,"('FUMt2_2', 'b3528')",0.0
+enzyme_min,"('RPI', 'b2914')",0.0
+enzyme_min,"('MALS', 'b4014')",0.0
+enzyme_min,"('TALA_reverse', 'b2464')",0.0
+enzyme_min,"('PTAr', 'b2458')",0.0
+enzyme_min,"('PGI_reverse', 'b4025')",0.0
+enzyme_min,"('ACONTb', 'b1276')",0.0
+enzyme_min,"('NADH16', 'b2286')",0.0
+enzyme_min,"('ALCD2x', 'b1241')",0.0
+enzyme_min,"('ATPS4r', 'b3732')",0.0
+enzyme_min,"('GLCpts', 'b1819')",0.0
+enzyme_min,"('PFK', 'b1723')",0.0
+enzyme_min,"('AKGt2r_reverse', 'b2587')",0.0
+enzyme_min,"('FBA_reverse', 'b2925')",0.0
+enzyme_min,"('FUM', 'b1611')",0.0
+enzyme_min,"('PTAr_reverse', 'b2297')",0.0
+enzyme_min,"('ACKr_reverse', 'b2296')",0.0
+enzyme_min,"('PPCK', 'b3403')",0.0
+enzyme_min,"('ATPS4r_reverse', 'b3735')",0.0
+enzyme_min,"('H2Ot_reverse', 'b0875')",0.0
+enzyme_min,"('ACALD', 'b0351')",0.0
+enzyme_min,"('TKT1', 'b2935')",0.0
+enzyme_min,"('AKGDH', 'b0727')",0.0
+enzyme_min,"('NADH16', 'b2283')",0.0
+enzyme_min,"('PGM_reverse', 'b3612')",0.0
+enzyme_min,"('PFL', 'b3951')",0.0
+enzyme_min,"('LDH_D_reverse', 'b2133')",0.0
+enzyme_min,"('GLCpts', 'b2417')",0.0
+enzyme_min,"('NADH16', 'b2288')",0.0
+enzyme_min,"('MALt2_2', 'b3528')",0.0
+enzyme_min,"('CS', 'b0720')",0.0
+enzyme_min,"('GLUt2r_reverse', 'b4077')",0.0
+enzyme_min,"('NADH16', 'b2277')",0.0
+enzyme_min,"('ACKr', 'b3115')",0.0
+enzyme_min,"('GLUN', 'b1812')",0.0
+enzyme_min,"('PGK_reverse', 'b2926')",0.0
+enzyme_min,"('CO2t_reverse', 's0001')",0.0
+enzyme_min,"('ACKr', 'b1849')",0.0
+enzyme_min,"('FBA', 'b1773')",0.0
+enzyme_min,"('D_LACt2', 'b2975')",0.0
+enzyme_min,"('PGI', 'b4025')",0.0
+enzyme_min,"('ATPS4r_reverse', 'b3736')",0.0
+enzyme_min,"('GLUSy', 'b3213')",0.0
+enzyme_min,"('TALA', 'b2464')",0.0
+enzyme_min,"('PTAr_reverse', 'b2458')",0.0
+enzyme_min,"('PGM', 'b3612')",0.0
+enzyme_min,"('PIt2r', 'b2987')",0.0
+enzyme_min,"('TKT1', 'b2465')",0.0
+enzyme_min,"('GLCpts', 'b1101')",0.0
+enzyme_min,"('ACONTb', 'b0118')",0.0
+enzyme_min,"('PGM_reverse', 'b4395')",0.0
+enzyme_min,"('PDH', 'b0114')",0.0
+enzyme_min,"('FUM_reverse', 'b1611')",0.0
+enzyme_min,"('SUCCt2_2', 'b3528')",0.0
+enzyme_min,"('PIt2r_reverse', 'b3493')",0.0
+enzyme_min,"('ACONTb_reverse', 'b1276')",0.0
+enzyme_min,"('O2t_reverse', 's0001')",0.0
+enzyme_min,"('LDH_D', 'b1380')",0.0
+enzyme_min,"('ACALD_reverse', 'b1241')",0.0
+enzyme_min,"('ICDHyr', 'b1136')",0.0
+enzyme_min,"('ACALDt', 's0001')",0.0
+enzyme_min,"('TKT2', 'b2465')",0.0
+enzyme_min,"('PGL', 'b0767')",0.0
+enzyme_min,"('GLUN', 'b0485')",0.0
+enzyme_min,"('ICL', 'b4015')",0.0
+enzyme_min,"('ALCD2x', 'b1478')",0.0
+enzyme_min,"('NH4t_reverse', 'b0451')",0.0
+enzyme_min,"('CYTBD', 'b0733')",0.0
+enzyme_min,"('PGM', 'b4395')",0.0
+enzyme_min,"('ALCD2x', 'b0356')",0.0
+enzyme_min,"('FUM', 'b1612')",0.0
+enzyme_min,"('ALCD2x_reverse', 'b1241')",0.0
+enzyme_min,"('PFL', 'b0902')",0.0
+enzyme_min,"('PGK', 'b2926')",0.0
+enzyme_min,"('GLUDy', 'b1761')",0.0
+enzyme_min,"('GLNabc', 'b0811')",0.0
+enzyme_min,"('ATPS4r', 'b3734')",0.0
+enzyme_min,"('ATPS4r_reverse', 'b3732')",0.0
+enzyme_min,"('NADH16', 'b2276')",0.0
+enzyme_min,"('ADK1_reverse', 'b0474')",0.0
+enzyme_min,"('FRUpts2', 'b1818')",0.0
+enzyme_min,"('AKGDH', 'b0726')",0.0
+enzyme_min,"('RPE', 'b4301')",0.0
+enzyme_min,"('RPE_reverse', 'b4301')",0.0
+enzyme_min,"('SUCDi', 'b0721')",0.0
+enzyme_min,"('NH4t', 'b0451')",0.0
+enzyme_min,"('MDH_reverse', 'b3236')",0.0
+enzyme_min,"('MDH', 'b3236')",0.0
+enzyme_min,"('GAPD', 'b1779')",0.0
+enzyme_min,"('NADH16', 'b2282')",0.0
+enzyme_min,"('SUCOAS_reverse', 'b0729')",0.0
+enzyme_min,"('NADTRHD', 'b1603')",0.0
+enzyme_min,"('GLCpts', 'b1818')",0.0
+enzyme_min,"('PFL', 'b3114')",0.0
+enzyme_min,"('PFK', 'b3916')",0.0
+enzyme_min,"('CYTBD', 'b0979')",0.0
+enzyme_min,"('TKT2', 'b2935')",0.0
+enzyme_min,"('FORt', 'b2492')",0.0
+enzyme_min,"('TPI_reverse', 'b3919')",0.0
+enzyme_min,"('ACALD_reverse', 'b0351')",0.0
+enzyme_min,"('FUM', 'b4122')",0.0
+enzyme_min,"('ATPS4r_reverse', 'b3734')",0.0
+enzyme_min,"('FRUpts2', 'b1817')",0.0
+enzyme_min,"('FRD7', 'b4154')",0.0
+enzyme_min,"('NADH16', 'b2284')",0.0
+enzyme_min,"('ACONTb_reverse', 'b0118')",0.0
+enzyme_min,"('RPE', 'b3386')",0.0
+enzyme_min,"('ATPS4r', 'b3737')",0.0
+enzyme_min,"('LDH_D', 'b2133')",0.0
+enzyme_min,"('NADTRHD', 'b1602')",0.0
+enzyme_min,"('FBA_reverse', 'b2097')",0.0
+enzyme_min,"('FORt2', 'b2492')",0.0
+enzyme_min,"('MALS', 'b2976')",0.0
+enzyme_min,"('G6PDH2r_reverse', 'b1852')",0.0
+enzyme_min,"('GLNS', 'b3870')",0.0
+enzyme_min,"('TALA_reverse', 'b0008')",0.0
+enzyme_min,"('SUCOAS_reverse', 'b0728')",0.0
+enzyme_min,"('FUM_reverse', 'b1612')",0.0
+enzyme_min,"('FBA', 'b2925')",0.0
+enzyme_min,"('GLCpts', 'b1817')",0.0
+enzyme_min,"('H2Ot', 's0001')",0.0
+E_ratio,,0.125

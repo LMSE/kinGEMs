@@ -37,6 +37,8 @@ SEED_ALIASES = EXTERNAL_DATA_DIR / "Unique_ModelSEED_Compound_Aliases.txt"
 TAXONOMY_IDS = {
     'E coli': 83333,  # Taxonomy ID for E. coli K-12
     'Yeast': 4932,    # Taxonomy ID for S. cerevisiae
+    'S elongatus': 1140,  # Taxonomy ID for S. elongatus PCC 7942: https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=1140
+    'P putida': 160488, # Taxonomy ID for P. putida KT2440: https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=160488
     # Add more organisms as needed
 }
 
