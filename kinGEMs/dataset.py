@@ -1037,3 +1037,95 @@ def format_kcats_like_gpr(reaction):
 
     return formatted
 
+def annotate_model_with_kcat_and_gpr(model: cobra.Model,
+                                     df: pd.DataFrame,
+                                     reaction_col: str = "Reactions",
+                                     gene_col: str     = "Single_gene",
+                                     gpr_col: str      = "GPR_rules",
+                                     kcat_col: str     = "kcat_mean") -> cobra.Model:
+    """
+    For each reaction in `model` that appears in df[reaction_col]:
+      • Collect all df[kcat_col] values for each gene (df[gene_col]), convert to 1/hr.
+      • reaction.annotation['kcat'] = flat list of all those converted kcats.
+      • reaction.annotation['gpr_replaced'] = original GPR (df[gpr_col]) 
+        with each gene name replaced by its kcat (or "(k1 or k2…)" if multiple).
+    
+    Parameters
+    ----------
+    model : cobra.Model
+        Your COBRApy model.
+    df : pandas.DataFrame
+        Must contain columns:
+          - reaction IDs in `reaction_col`
+          - gene IDs in `gene_col`
+          - numeric kcat values (1/s) in `kcat_col`
+          - logical GPR strings in `gpr_col`
+    reaction_col : str
+        Name of the DataFrame column with reaction IDs.
+    gene_col : str
+        Name of the column with gene IDs.
+    gpr_col : str
+        Name of the column with the original GPR expression.
+    kcat_col : str
+        Name of the column with kcat values in 1/s.
+    
+    Returns
+    -------
+    cobra.Model
+        The same model, with each annotated reaction carrying:
+          - annotation['kcat']
+          - annotation['gpr_replaced']
+    """
+    # group your data by reaction
+    for rxn_id, subdf in df.groupby(reaction_col, dropna=False):
+        if rxn_id not in model.reactions:
+            continue
+        rxn = model.reactions.get_by_id(rxn_id)
+
+        # ---- tag raw GPR structure
+        rule = (rxn.gene_reaction_rule or "").lower()
+        if "and" in rule or "or" in rule:
+            rxn.annotation["gpr"] = "AND/OR"
+        else:
+            rxn.annotation["gpr"] = "1"
+
+        # build gene → [kcat1, kcat2, …] (in 1/hr)
+        gene2kcats = {}
+        for _, row in subdf.iterrows():
+            gene = row[gene_col]
+            raw_k = row[kcat_col]
+            if pd.isna(raw_k):
+                continue
+            k_hr = float(raw_k) * 3600
+            gene2kcats.setdefault(gene, []).append(k_hr)
+
+        # flatten all kcats for reaction-level annotation
+        all_kcats = [k for ks in gene2kcats.values() for k in ks]
+        if all_kcats:
+            rxn.annotation["kcat"] = all_kcats
+
+        # pick one representative GPR string (assumes identical in each sub-row)
+        gpr = subdf[gpr_col].dropna().unique()
+        if len(gpr) == 0:
+            continue
+        gpr = gpr[0]
+
+        # build a regex that matches any of your gene IDs as whole words
+        pattern = r'\b(' + '|'.join(map(re.escape, gene2kcats.keys())) + r')\b'
+
+        def _replace_gene(match):
+            gene = match.group(1)
+            klist = gene2kcats.get(gene, [])
+            if not klist:
+                return gene
+            if len(klist) == 1:
+                return f"{klist[0]:.6g}"
+            # multiple measurements → parenthesize them
+            inner = " or ".join(f"{k:.6g}" for k in klist)
+            return f"({inner})"
+
+        # do the substitution
+        gpr_replaced = re.sub(pattern, _replace_gene, gpr)
+        rxn.annotation["gpr_replaced"] = gpr_replaced
+
+    return model

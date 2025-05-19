@@ -13,9 +13,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from ..config import ensure_dir_exists
+from ..dataset import annotate_model_with_kcat_and_gpr
 
 
-def simulated_annealing(model, processed_data, biomass_reaction, 
+def simulated_annealing(model, processed_data, biomass_reaction, objective_value, 
                         output_dir=None, enzyme_fraction=0.125, 
                         temperature=1.0, cooling_rate=0.98, min_temperature=0.01, 
                         max_iterations=250, max_unchanged_iterations=3, 
@@ -113,7 +114,7 @@ def simulated_annealing(model, processed_data, biomass_reaction,
     iterations = [0]
     biomasses = [biomass]
 
-    while temperature > min_temperature and iteration < max_iterations:
+    while temperature > min_temperature and iteration < max_iterations and current_biomass<objective_value:
         print(f"Iteration {iteration}")
 
         for i in range(len(largest_rxn_id)):
@@ -122,6 +123,11 @@ def simulated_annealing(model, processed_data, biomass_reaction,
                 updated_df = update_kcat(df_new, largest_rxn_id[i], largest_gene_id[i], new_kcat)
             else:
                 updated_df = update_kcat(updated_df, largest_rxn_id[i], largest_gene_id[i], new_kcat)
+
+        model = annotate_model_with_kcat_and_gpr(
+            model=model,
+            df=processed_data
+        )
 
         new_biomass, df_FBA, _, _ = run_optimization_with_dataframe(
             model=model,

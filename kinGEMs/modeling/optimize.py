@@ -384,8 +384,15 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
     multiple_enzyme_pass = []
     no_enzyme_pass = []
 
+    # CHECKPOINTS for evaluate_gpr & rule_promiscuous
+    isoenzymes_pass = []
+    enzyme_complexes_pass = [] 
+    promiscuous_pass = []
+
+
     for reaction in mod.reactions:
         gpr_tag = (reaction.annotation).get('gpr')
+        # Get the reaction object from the model
         enzymes_for_reaction = [i for j, i in reaction_gene_tuple if j == reaction.id]
         
         if multi_enzyme_off:
@@ -467,6 +474,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
     # FUNCTION for rule_kcat to optimize GPRs
     sum_enzymes_check = []
     gpr_string_check = []
+
     def evaluate_gpr(m, j, i, gpr_string):
         enzyme_kcats = re.findall(r'[0-9.]+', gpr_string)
         current_set = []
@@ -481,6 +489,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
         # isozymes
         if not isoenzymes_off: 
             if 'or' in gpr_string:
+                isoenzymes_pass.append(j)
                 # Now both flux and kcat are in 1/hr units
                 return m.reaction[j] <= sum(k * m.enzyme[i] for k in current_set)
         else:
@@ -490,6 +499,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
         # complexes
         if not complexes_off:
             if 'and' in gpr_string:
+                enzyme_complexes_pass.append(j)
                 sum_enzymes_check.append([j, i])
                 gpr_string_check.append([j, gpr_string])
                 mean_kcat = max(current_set)  # Change to max or mean (min might be too small)
@@ -514,13 +524,18 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
         elif (j, i) in kcat_dict:
             if kcat_dict[(j, i)] and not (math.isnan(kcat_dict[(j, i)][0]) or kcat_dict[(j, i)][0] is None):
                 reaction_has_kcat = True
-        
+        # print(f"CHECKING FOR KCAT DATA IN REACTION {j}: {reaction_has_kcat}")
         # Check if gene has sequence data
         if i in gene_sequences_dict and gene_sequences_dict[i]:
             gene_has_sequence = True
+        # print(f"CHECKING FOR GENE DATA IN REACTION {j}: {gene_has_sequence}")
         
         # If we're missing either kcat or sequence, treat as regular reaction
         if not reaction_has_kcat or not gene_has_sequence:
+            no_enzyme_pass.append(j)
+            return Constraint.Feasible  # noqa: F405
+        
+        if reaction_has_kcat is False or gene_has_sequence is False:
             no_enzyme_pass.append(j)
             return Constraint.Feasible  # noqa: F405
         
@@ -567,6 +582,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
         
         try:
             # Now both flux and kcat are in 1/hr units
+            promiscuous_pass.append(j)
             return max(m.reaction[j] / kcat_dict[j, i][0] for j in valid_reactions) <= m.enzyme[i]
         except:  # noqa: E722
             return Constraint.Feasible  # noqa: F405
@@ -584,7 +600,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
             return 0  # Return 0 for invalid sequences
     
     # MODIFIED: CONSTRAINT total enzyme - Now handles missing data
-    if enzyme_ratio:  
+    if enzyme_ratio: 
         # VARIABLE
         Concretemodel.E_ratio = Var(within=NonNegativeReals, bounds=(0, enzyme_upper_bound)) # gP/gDCW  # noqa: F405
         
@@ -648,11 +664,18 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
             total_reactions = len(reaction_gene_tuple)
             constrained_reactions = len(single_enzyme_pass) + len(multiple_enzyme_pass)
             unconstrained_reactions = len(no_enzyme_pass)
+            promiscuous_enzymes = len(promiscuous_pass)
+            isoenzyme_reactions = len(isoenzymes_pass)
+            enzyme_complexes_reactions = len(enzyme_complexes_pass)
+
             
             print("Optimization completed successfully!")
             print(f"Total reaction-gene pairs: {total_reactions}")
             print(f"Enzyme-constrained pairs: {constrained_reactions}")
             print(f"Unconstrained pairs (missing data): {unconstrained_reactions}")
+            print(f"Promiscuous enzymes in system: {promiscuous_enzymes}")
+            print(f"Isoenzymatic passes: {isoenzyme_reactions}")
+            print(f"Enzyme complex reactions: {enzyme_complexes_reactions}")
             
         else:
             # Handle unsuccessful optimization
