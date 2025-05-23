@@ -69,6 +69,7 @@ def simulated_annealing(model, processed_data, biomass_reaction, objective_value
         return math.exp((new_cost - old_cost) / temperature)
 
     def get_neighbor(kcat_value, std):
+        kcat_value, std = kcat_value*3600, std*3600 # Make sure you are converting 1/s to 1/hr
         new_kcat = kcat_value * (1.5 + random.uniform(-1, 3.5))
         if std == 0:
             std = kcat_value * 0.1
@@ -80,11 +81,11 @@ def simulated_annealing(model, processed_data, biomass_reaction, objective_value
     def update_kcat(df, reaction_id, gene_id, new_kcat_value):
         updated_df = df.copy()
         condition = (updated_df['Reactions'] == reaction_id) & (updated_df['Single_gene'] == gene_id)
-        updated_df.loc[condition, 'kcat_mean'] = new_kcat_value
+        updated_df.loc[condition, 'kcat_mean'] = new_kcat_value/3600
         return updated_df
 
-    # Select top targets for tuning (e.g., top 10 highest kcat values)
-    top_targets = processed_data.sort_values(by='kcat_mean', ascending=False).head(10)
+    # Select top targets for tuning (e.g., top 25 highest kcat values)
+    top_targets = processed_data.sort_values(by='kcat_mean', ascending=False).head(25)
     largest_rxn_id = top_targets['Reactions'].tolist()
     largest_gene_id = top_targets['Single_gene'].tolist()
     largest_kcat = top_targets['kcat_mean'].tolist()
