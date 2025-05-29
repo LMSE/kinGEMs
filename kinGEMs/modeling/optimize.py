@@ -236,7 +236,7 @@ def simplified_optimization(model, processed_df, objective_reaction):
 def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=None, 
                     enzyme_upper_bound=0.125, enzyme_ratio=True, maximization=True, 
                     multi_enzyme_off=False, isoenzymes_off=False, 
-                    promiscuous_off=False, complexes_off=False):
+                    promiscuous_off=False, complexes_off=False, print_reaction_conditions=False):
     """
     Run enzyme-constrained flux balance analysis.
     
@@ -668,14 +668,14 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
             isoenzyme_reactions = len(isoenzymes_pass)
             enzyme_complexes_reactions = len(enzyme_complexes_pass)
 
-            
-            print("Optimization completed successfully!")
-            print(f"Total reaction-gene pairs: {total_reactions}")
-            print(f"Enzyme-constrained pairs: {constrained_reactions}")
-            print(f"Unconstrained pairs (missing data): {unconstrained_reactions}")
-            print(f"Promiscuous enzymes in system: {promiscuous_enzymes}")
-            print(f"Isoenzymatic passes: {isoenzyme_reactions}")
-            print(f"Enzyme complex reactions: {enzyme_complexes_reactions}")
+            if print_reaction_conditions==True:
+                print("Optimization completed successfully!")
+                print(f"Total reaction-gene pairs: {total_reactions}")
+                print(f"Enzyme-constrained pairs: {constrained_reactions}")
+                print(f"Unconstrained pairs (missing data): {unconstrained_reactions}")
+                print(f"Promiscuous enzymes in system: {promiscuous_enzymes}")
+                print(f"Isoenzymatic passes: {isoenzyme_reactions}")
+                print(f"Enzyme complex reactions: {enzyme_complexes_reactions}")
             
         else:
             # Handle unsuccessful optimization
