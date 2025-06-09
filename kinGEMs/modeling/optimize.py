@@ -278,16 +278,21 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
     tuple
         (solution_value, df_FBA, gene_sequences_dict)
     """
+
+    from pyomo.environ import Suffix
+
     # Model handling - load if string path provided
     if isinstance(model, str):
         try:
             directory = os.path.dirname(__file__)
             GEM_file = os.path.join(directory, model)
             mod = cb.io.read_sbml_model(GEM_file)
+            print("Loaded model from GEM file")
         except:  # noqa: E722
             raise ValueError(f"Could not load model from path: {model}")
     else:
         mod = model
+        print("Loaded model from input irreversible model!")
     
     # Gene sequences handling
     if gene_sequences_dict is None and isinstance(gene_sequences_dict, str):
@@ -307,6 +312,8 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
             kcat_dict = df_kcat.set_index('Key').to_dict()['Value']
         except:  # noqa: E722
             raise ValueError(f"Could not load kcat dictionary from: {kcat_dict}")
+        
+    print("PRINT INITIAL KCAT DICT: ", kcat_dict)
     
     # ============================================================ #
     #                         MODEL SET UP 
@@ -421,6 +428,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
     # OBJECTIVE FUNCTION: maximizing or minimizing reaction
     if maximization:
         def rule_obj(m, objective_var):
+            print("OBJECTIVE FUNCTION IS: ", m.reaction[objective_var])
             return m.reaction[objective_var]
         Concretemodel.objective = Objective(rule=rule_obj(Concretemodel, objective_reaction), sense=maximize)  # noqa: F405
     else:
@@ -478,11 +486,9 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
     def evaluate_gpr(m, j, i, gpr_string):
         enzyme_kcats = re.findall(r'[0-9.]+', gpr_string)
         current_set = []
-        
         for k in enzyme_kcats:
             try:
-                # Convert each kcat from 1/s to 1/hr by multiplying by 3600
-                current_set.append(float(k) * 3600)
+                current_set.append(float(k))
             except:  # noqa: E722
                 pass
             
@@ -491,6 +497,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
             if 'or' in gpr_string:
                 isoenzymes_pass.append(j)
                 # Now both flux and kcat are in 1/hr units
+                print(f"ISOENZYMES SCENARIO: kcat value {current_set} 1/hr")
                 return m.reaction[j] <= sum(k * m.enzyme[i] for k in current_set)
         else:
             if 'or' in gpr_string:
@@ -504,6 +511,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
                 gpr_string_check.append([j, gpr_string])
                 mean_kcat = max(current_set)  # Change to max or mean (min might be too small)
                 # Now both flux and kcat are in 1/hr units
+                print(f"COMPLEX SCENARIO: kcat value {mean_kcat} 1/hr")
                 return m.reaction[j] <= mean_kcat * m.enzyme_min[j, i]
         else:
             if 'and' in gpr_string:
@@ -520,10 +528,16 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
         if j in kcat:
             if kcat[j] and not (math.isnan(kcat[j][0]) or kcat[j][0] is None):
                 reaction_has_kcat = True
+                print("REACTION SHOULD HAVE A KCAT HERE", reaction_has_kcat)
+                print(f"reaction: {j} and kcat: {kcat[j][0]}")
         # Also check in the provided kcat_dict
         elif (j, i) in kcat_dict:
             if kcat_dict[(j, i)] and not (math.isnan(kcat_dict[(j, i)][0]) or kcat_dict[(j, i)][0] is None):
                 reaction_has_kcat = True
+                print("REACTION SHOULD HAVE A KCAT HERE", reaction_has_kcat)
+                print(f"reaction: {j} and gene{i} and kcat: {kcat[j, i][0]}")
+
+
         # print(f"CHECKING FOR KCAT DATA IN REACTION {j}: {reaction_has_kcat}")
         # Check if gene has sequence data
         if i in gene_sequences_dict and gene_sequences_dict[i]:
@@ -543,6 +557,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
         if (j, i) in single_enzyme and j in kcat:
             single_enzyme_pass.append(j)
             # Now both flux and kcat are in 1/hr units
+            print(f"SINGLE ENZYME CASE, reaction: {j} and kcat {kcat[j][0]}")
             return m.reaction[j] <= kcat[j][0] * m.enzyme[i]
 
         if (j, i) in multiple_enzyme and j in gpr:
@@ -584,6 +599,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
             # Now both flux and kcat are in 1/hr units
             promiscuous_pass.append(j)
             return max(m.reaction[j] / kcat_dict[j, i][0] for j in valid_reactions) <= m.enzyme[i]
+            (f"PROMISCUOUS ENZYME CASE: kcat: {kcat[j, i]}, reaction: {j}")
         except:  # noqa: E722
             return Constraint.Feasible  # noqa: F405
             
@@ -599,96 +615,188 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
         except:  # noqa: E722
             return 0  # Return 0 for invalid sequences
     
-    # MODIFIED: CONSTRAINT total enzyme - Now handles missing data
-    if enzyme_ratio: 
-        # VARIABLE
-        Concretemodel.E_ratio = Var(within=NonNegativeReals, bounds=(0, enzyme_upper_bound)) # gP/gDCW  # noqa: F405
-        
-        # Handle missing sequences by using default molecular weight
-        def get_molecular_weight(gene):
+    def get_molecular_weight(gene):
             if gene in gene_sequences_dict and gene_sequences_dict[gene]:
                 mw = calculate_molecular_weight(gene_sequences_dict[gene])
                 return mw if mw > 0 else 100000  # Default MW if calculation fails
             else:
                 return 100000  # Default molecular weight for missing sequences (in g/mol)
-        
-        Concretemodel.enzyme_molecular_weights = Param(  # noqa: F405
-            Concretemodel.enzyme_set, 
-            initialize={gene: get_molecular_weight(gene) for gene in genes}
-        )
-        
-        # CONSTRAINT
-        def rule_E_total(m):
-            total_enzyme_weight_expr = sum(m.enzyme[i] * m.enzyme_molecular_weights[i] 
-                                          for i in m.enzyme) * 0.001
-            return total_enzyme_weight_expr <= m.E_ratio
-        Concretemodel.set_E_total = Constraint(rule=rule_E_total)  # noqa: F405
-        
-    else:
-        # VARIABLE
-        Concretemodel.E_total = Var(within=NonNegativeReals, bounds=(0, enzyme_upper_bound)) # mmol/gDCW  # noqa: F405
-        
-        # CONSTRAINT
-        def rule_E_total(m):
-            return sum(m.enzyme[i] for (j, i) in reaction_gene_tuple) <= m.E_total
-        Concretemodel.set_E_total = Constraint(rule=rule_E_total)  # noqa: F405
     
-    # Solving
-    solver = SolverFactory('ipopt')
-    solver.options['max_iter'] = 1000  # Increased iteration limit
-    solver.options['acceptable_tol'] = 1e-6  # More lenient tolerance
-    
-    try:
-        # Attempt to solve the model
-        results = solver.solve(Concretemodel, tee=False)
+    # # MODIFIED: CONSTRAINT total enzyme - Now handles missing data
+    # if enzyme_ratio: 
+    #     # VARIABLE
+    #     Concretemodel.E_ratio = Var(within=NonNegativeReals, bounds=(0, enzyme_upper_bound)) # gP/gDCW  # noqa: F405
         
-        # Check the solver status
-        if (results.solver.status == pyo.SolverStatus.ok and 
-            results.solver.termination_condition == pyo.TerminationCondition.optimal):
-            # Successful optimization
-            solution_value = pyo.value(Concretemodel.objective)
-    
-            variable = []
-            index = []
-            value = []
-    
-            for v in Concretemodel.component_objects(pyo.Var, active=True):
-                for i in v:
-                    variable.append(v.name)
-                    index.append(i)
-                    value.append(pyo.value(v[i]))
-    
-            df_FBA = pd.DataFrame({"Variable": variable, "Index": index, "Value": value})
-            
-            # Report statistics about missing data handling
-            total_reactions = len(reaction_gene_tuple)
-            constrained_reactions = len(single_enzyme_pass) + len(multiple_enzyme_pass)
-            unconstrained_reactions = len(no_enzyme_pass)
-            promiscuous_enzymes = len(promiscuous_pass)
-            isoenzyme_reactions = len(isoenzymes_pass)
-            enzyme_complexes_reactions = len(enzyme_complexes_pass)
+    #     # Handle missing sequences by using default molecular weight
+        
+        
+    #     Concretemodel.enzyme_molecular_weights = Param(  # noqa: F405
+    #         Concretemodel.enzyme_set, 
+    #         initialize={gene: get_molecular_weight(gene) for gene in genes}
+    #     )
+        
+    #     # CONSTRAINT
+    #     def rule_E_total(m):
+    #         total_enzyme_weight_expr = sum(m.enzyme[i] * m.enzyme_molecular_weights[i] 
+    #                                       for i in m.enzyme) * 0.001
+    #         return total_enzyme_weight_expr <= m.E_ratio
+    #     Concretemodel.set_E_total = Constraint(rule=rule_E_total)  # noqa: F405
+        
+    # else:
+    #     # VARIABLE
+    #     Concretemodel.E_total = Var(within=NonNegativeReals, bounds=(0, enzyme_upper_bound)) # mmol/gDCW  # noqa: F405
+        
+    #     # CONSTRAINT
+    #     def rule_E_total(m):
+    #         return sum(m.enzyme[i] for (j, i) in reaction_gene_tuple) <= m.E_total
+    #     Concretemodel.set_E_total = Constraint(rule=rule_E_total)  # noqa: F405
 
-            if print_reaction_conditions==True:
-                print("Optimization completed successfully!")
-                print(f"Total reaction-gene pairs: {total_reactions}")
-                print(f"Enzyme-constrained pairs: {constrained_reactions}")
-                print(f"Unconstrained pairs (missing data): {unconstrained_reactions}")
-                print(f"Promiscuous enzymes in system: {promiscuous_enzymes}")
-                print(f"Isoenzymatic passes: {isoenzyme_reactions}")
-                print(f"Enzyme complex reactions: {enzyme_complexes_reactions}")
+    # # MODIFIED: CONSTRAINT total enzyme – Now fixed budget, no Var
+    # if enzyme_ratio:
+    #     # (keep your Param for molecular weights)
+    #     Concretemodel.enzyme_molecular_weights = Param(
+    #         Concretemodel.enzyme_set,
+    #         initialize={gene: get_molecular_weight(gene) for gene in genes}
+    #     )
+
+    #     # CONSTRAINT: total enzyme mass ≤ fixed fraction of cell mass
+    #     def rule_E_total(m): # old 
+    #         total_enzyme_weight_expr = sum(
+    #             m.enzyme[i] * m.enzyme_molecular_weights[i]
+    #             for i in m.enzyme
+    #         ) * 0.001
+    #         return total_enzyme_weight_expr <= enzyme_upper_bound
+        
+    #     # def rule_E_total(m): # new 
+    #     #     total_weight = sum(
+    #     #         m.enzyme[i] * m.enzyme_molecular_weights[i]
+    #     #         for i in m.enzyme_set
+    #     #     ) * 0.001
+    #     #     return total_weight <= enzyme_upper_bound
+        
+
+    #     Concretemodel.set_E_total = Constraint(rule=rule_E_total)
+
+    # else:
+    #     # CONSTRAINT: total enzyme molar ≤ fixed budget
+    #     def rule_E_total(m): # old
+    #         return sum(
+    #             m.enzyme[i] for (j, i) in reaction_gene_tuple
+    #         ) <= enzyme_upper_bound
+
+    #     # def rule_E_total(m): # new
+    #     #     # each gene counted only once
+    #     #     return sum(m.enzyme[i] for i in m.enzyme_set) <= enzyme_upper_bound
             
+
+    #     Concretemodel.set_E_total = Constraint(rule=rule_E_total)
+
+    
+    ## CONCRETE MODEL BUILDING DONE! Now we start optimization portion 
+
+    # … (all the code that builds Concretemodel) …
+
+    # If you already declared a "dual" suffix elsewhere, delete it first:
+    if hasattr(Concretemodel, 'dual'):
+        Concretemodel.del_component('dual')
+
+    # 2) Attach the IMPORT‐only dual suffix:
+    from pyomo.environ import Suffix
+    Concretemodel.dual = Suffix(direction=Suffix.IMPORT)
+
+    # 3) Use IPOPT for (non)linear optimization
+    from pyomo.environ import SolverFactory
+    solver = SolverFactory('ipopt')
+    # IPOPT options — you can tweak these
+    solver.options['max_iter'] = 10_000
+    solver.options['tol']      = 1e-8
+
+    # 4) Now solve (your Concretemodel.dual suffix was already attached above)
+    try:
+        results = solver.solve(
+            Concretemodel,
+            tee=False
+        )
+
+            # … (often‐used code to extract objective, variables, df_FBA, etc.) …
+        solution_value = pyo.value(Concretemodel.objective)
+
+        variable = []
+        index = []
+        value = []
+        for v in Concretemodel.component_objects(pyo.Var, active=True):
+            for i in v:
+                variable.append(v.name)
+                index.append(i)
+                value.append(pyo.value(v[i]))
+
+        df_FBA = pd.DataFrame({"Variable": variable, "Index": index, "Value": value})
+
+        # (print your reaction‐condition statistics here, if desired)
+        total_reactions = len(reaction_gene_tuple)
+        constrained_reactions = len(single_enzyme_pass) + len(multiple_enzyme_pass)
+        unconstrained_reactions = len(no_enzyme_pass)
+        promiscuous_enzymes = len(promiscuous_pass)
+        isoenzyme_reactions = len(isoenzymes_pass)
+        enzyme_complexes_reactions = len(enzyme_complexes_pass)
+
+        if print_reaction_conditions:
+            print("Optimization completed successfully!")
+            print(f"Total reaction-gene pairs: {total_reactions}")
+            print(f"Enzyme-constrained pairs: {constrained_reactions}")
+            print(f"Unconstrained pairs (missing data): {unconstrained_reactions}")
+            print(f"Promiscuous enzymes in system: {promiscuous_enzymes}")
+            print(f"Isoenzymatic passes: {isoenzyme_reactions}")
+            print(f"Enzyme complex reactions: {enzyme_complexes_reactions}")
+
         else:
             # Handle unsuccessful optimization
-            raise ValueError(f"Solver did not find an optimal solution. Status: {results.solver.status}, "
-                            f"Termination condition: {results.solver.termination_condition}")
-    
+            raise ValueError(
+                f"Solver did not find an optimal solution. "
+                f"Status: {results.solver.status}, "
+                f"Termination: {results.solver.termination_condition}"
+            )
+
     except Exception as e:
         # Handle exceptions raised by the solver
         print(f"An error occurred during optimization: {e}")
         df_FBA = pd.DataFrame()  # Return an empty DataFrame
         solution_value = None
-            
-    return solution_value, df_FBA, gene_sequences_dict
+
+    # Print a sanity‐check of which solver was actually used:
+    print("Solver used:", results.solver.name)                        
+    print("Termination condition:", results.solver.termination_condition)
+    print("Solver status:", results.solver.status)
+
+    # # 5) Now that GLPK has populated Concretemodel.dual, you can check slack/dual:
+    # if (results.solver.status == pyo.SolverStatus.ok and
+    #     results.solver.termination_condition == pyo.TerminationCondition.optimal):
+    #     for constr_key in Concretemodel.set_kcat:
+    #         c     = Concretemodel.set_kcat[constr_key]
+    #         slack = c.slack()
+    #         dual  = Concretemodel.dual[c]   # <— this will only exist if you used suffixes=['dual']
+    #         tol = 1e-6
+    #         if abs(slack) <= tol and abs(dual) < tol:
+    #             print(f"Constraint {constr_key} is binding but dual≈0 (unexpected).")
+
+    print("Biomass flux:", pyo.value(Concretemodel.objective))
+    # for ex in ["EX_glc__D_e_reverse", "EX_o2_e_reverse", "EX_nh4_e_reverse"]:
+    #     if ex in Concretemodel.reaction:
+    #         val = pyo.value(Concretemodel.reaction[ex])
+    #     else:
+    #         val = 0.0
+    #     print(f"{ex:12s}  = {val:.4f}")
+    for con in Concretemodel.component_objects(Constraint, active=True):
+        print("Constraint block:", con.name)
+        for idx in con:
+            cdata = con[idx]
+            print(f"  {con.name}[{idx}]:")
+            print("     expr :", cdata.body)
+            print("     lower:", cdata.lower, "  upper:", cdata.upper)
+
+
+    return solution_value, df_FBA, gene_sequences_dict, Concretemodel
+
 
 def create_descriptive_filename(objective_reaction, enzyme_upper_bound, maximization, 
                          multi_enzyme_off, isoenzymes_off, promiscuous_off, complexes_off,
@@ -757,7 +865,7 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
                     enzyme_upper_bound=0.125, enzyme_ratio=True, maximization=True, 
                     multi_enzyme_off=False, isoenzymes_off=False, 
                     promiscuous_off=False, complexes_off=False,
-                    output_dir=None, save_results=True):
+                    output_dir=None, save_results=True, print_reaction_conditions=False):
     """
     Run enzyme-constrained flux balance analysis using a processed dataframe.
     
@@ -819,7 +927,7 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
                 gene_sequences_dict[gene_id] = row['SEQ']
     
     # Call the original run_optimization function with the extracted kcat_dict
-    solution_value, df_FBA, gene_sequences_dict = run_optimization(
+    solution_value, df_FBA, gene_sequences_dict, pm_model = run_optimization(
         model=model, 
         kcat_dict=kcat_dict, 
         objective_reaction=objective_reaction,
@@ -830,7 +938,8 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
         multi_enzyme_off=multi_enzyme_off, 
         isoenzymes_off=isoenzymes_off,
         promiscuous_off=promiscuous_off, 
-        complexes_off=complexes_off
+        complexes_off=complexes_off,
+        print_reaction_conditions=print_reaction_conditions
     )
     
     # Create descriptive filename and save results if requested
@@ -968,6 +1077,7 @@ def debug_enzyme_constraints_detailed(model, processed_data, objective_reaction)
         Constraint,
         NonNegativeReals,
         Objective,
+        Suffix,
         Var,
         maximize,
         value,
@@ -995,8 +1105,8 @@ def debug_enzyme_constraints_detailed(model, processed_data, objective_reaction)
     test_model.obj = Objective(expr=test_model.reaction, sense=maximize)
     
     # Solve
-    solver = SolverFactory('ipopt')
-    solver.options['max_iter'] = 100
+    solver = SolverFactory('glpk')
+    # solver.options['max_iter'] = 100
     
     try:
         results = solver.solve(test_model, tee=False)
@@ -1082,3 +1192,118 @@ def debug_enzyme_constraints_detailed(model, processed_data, objective_reaction)
     
     return kcat_dict, gene_sequences_dict
 
+def validate_enzyme_constraints(df_FBA,
+                                kcat_dict_hr,
+                                gene_sequences_dict,
+                                reaction_gene_list,
+                                gpr_dict,
+                                enzyme_ratio,            # True or False
+                                enzyme_upper_bound,      # the same upper bound you passed
+                                enzyme_mw_dict,          # {gene: molecular_weight_in_dalton}
+                                S_mat):
+    """
+    Given the DataFrame df_FBA (with columns ['Variable','Index','Value'])
+    and the same dictionaries used inside run_optimization, check:
+      1) For every (reaction, gene) that should be constrained, v_j ≤ kcat_j * e_i.
+      2) Total‐enzyme constraint: sum(e_i * MW_i)*0.001 ≤ enzyme_upper_bound (if enzyme_ratio=True),
+         or sum(e_i) ≤ enzyme_upper_bound (if enzyme_ratio=False).
+      3) Steady‐state (S · v = 0) up to a small numerical tolerance.
+    """
+
+    import numpy as np
+
+    # 1) Build solution dicts for v_j and e_i
+    #    df_FBA rows look like: Variable='reaction', Index='R_EX_glc__D_e', Value=4.5
+    flux_sol = {}   # reaction_id → flux_value
+    enz_sol  = {}   # gene_id     → enzyme_amount
+
+    for _, row in df_FBA.iterrows():
+        varname = row['Variable']
+        idx     = row['Index']
+        val     = float(row['Value'])
+        if varname == 'reaction':
+            flux_sol[idx] = val
+        elif varname == 'enzyme':
+            enz_sol[idx] = val
+    # 1a) Check that we really extracted them
+    if not flux_sol:
+        raise RuntimeError("Could not find any 'reaction' entries in df_FBA.")
+    if not enz_sol:
+        raise RuntimeError("Could not find any 'enzyme' entries in df_FBA.")
+
+    # 2) Check each (reaction, gene) in reaction_gene_list
+    violations = []
+    for (j, i) in reaction_gene_list:
+        # Was (j,i) supposed to be constrained?  It will be constrained if:
+        #   • j in kcat_dict_hr (or in reaction.annotation['kcat']) AND
+        #   • i in gene_sequences_dict
+        #   • AND inside your rule_kcat pipeline, it did NOT fall into the “missing data → Feasible” case.
+        #
+        # For simplicity, assume: if j in kcat_dict_hr and i in gene_sequences_dict, then it should be constrained.
+        if j not in kcat_dict_hr or i not in gene_sequences_dict or not gene_sequences_dict[i]:
+            continue
+
+        vj = flux_sol.get(j, 0.0)
+        # there might be multiple possible kcats for this reaction—your code picks the first (or does a max).
+        # Here we assume kcat_dict_hr[j] is a float or a one-element list.
+        kc = kcat_dict_hr[j]
+        if isinstance(kc, list):
+            kc_val = kc[0]
+        else:
+            kc_val = kc
+
+        ei = enz_sol.get(i, 0.0)
+        if vj > kc_val * ei + 1e-6:    # small tolerance for numerical solver noise
+            violations.append((j, i, vj, kc_val*ei))
+
+    if violations:
+        print("FOUND violations of (v_j ≤ kcat·e_i):")
+        for j, i, vj, bound in violations[:5]:
+            print(f"  • Reaction {j}, gene {i}: flux {vj:.4g} > kcat·e = {bound:.4g}")
+        print(f"...plus {len(violations)-5} more." if len(violations)>5 else "")
+    else:
+        print("All (reaction, gene) v_j ≤ kcat·e_i constraints are satisfied (within 1e-6 tolerance).")
+
+    # 3) Check total‐enzyme constraint
+    if enzyme_ratio:
+        # Reconstruct: total_weight_grams_per_gDCW = ∑ (e_i [mmol/gDCW] * MW_i [g/mol]) * 1e−3 (to get g/gDCW).
+        total_weight = 0.0
+        for gene, ei in enz_sol.items():
+            mw = enzyme_mw_dict.get(gene, 1e5)  # fallback if missing
+            total_weight += ei * mw * 1e-3
+        if total_weight > enzyme_upper_bound + 1e-6:
+            print(f"Total‐enzyme weight constraint violated: {total_weight:.6f} > {enzyme_upper_bound:.6f}")
+        else:
+            print(f"Total‐enzyme weight = {total_weight:.6f} ≤ {enzyme_upper_bound:.6f} (OK)")
+
+    else:
+        total_e = sum(enz_sol.values())
+        if total_e > enzyme_upper_bound + 1e-6:
+            print(f"Total‐enzyme mmol constraint violated: {total_e:.6f} > {enzyme_upper_bound:.6f}")
+        else:
+            print(f"Sum(e_i) = {total_e:.6f} ≤ {enzyme_upper_bound:.6f} (OK)")
+
+    # 4) Check steady‐state: S·v ≈ 0 for every metabolite t
+    ss_violations = []
+    for (met_id, rxn_id), coeff in S_mat.items():
+        # S_mat keys are tuples (met_id, rxn_id) → stoich.  We want ∑_j S[t,j]·v_j = 0
+        # so accumulate into a per‐met residual.
+        pass
+    # Instead, build a metabolite → sum(S[t,j]*v_j)
+    met_residual = {t: 0.0 for (t, _) in S_mat.keys()}
+    for (t, j), coeff in S_mat.items():
+        vj = flux_sol.get(j, 0.0)
+        met_residual[t] += coeff * vj
+
+    # Now check if any |residual| > tol
+    for t, resid in met_residual.items():
+        if abs(resid) > 1e-6:
+            ss_violations.append((t, resid))
+
+    if ss_violations:
+        print("Steady‐state (S·v=0) violations (|residual| > 1e−6):")
+        for t, resid in ss_violations[:5]:
+            print(f"  • Metabolite {t}: ∑ S[{t},j]·v_j = {resid:.4g}")
+        print(f"...plus {len(ss_violations)-5} more." if len(ss_violations)>5 else "")
+    else:
+        print("All metabolites satisfy steady‐state (S·v≈0).")

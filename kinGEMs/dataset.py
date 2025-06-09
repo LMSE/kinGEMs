@@ -939,6 +939,8 @@ def process_kcat_predictions(merged_df, predictions_csv_path, output_path=None):
     # Calculate min and max kcat values
     result_df['kcat_min'] = result_df[kcat_cols].min(axis=1)
     result_df['kcat_max'] = result_df[kcat_cols].max(axis=1)
+
+    result_df = result_df.drop('kcat_x', axis=1)
     
     # Save if output path provided
     if output_path:
