@@ -26,7 +26,7 @@ def simulated_annealing(
     objective_value,
     gene_sequences_dict,
     output_dir=None,
-    enzyme_fraction=0.125,
+    enzyme_fraction=0.15,
     temperature=1.0,
     cooling_rate=0.98,
     min_temperature=0.01,
@@ -84,13 +84,13 @@ def simulated_annealing(
         save_results=False
     )
 
-    # pick top 25
+    # pick top 10
     enzyme_df = df_FBA[df_FBA['Variable']=='enzyme'].copy()
     enzyme_df['MW'] = enzyme_df['Index'].map(mw_dict).fillna(0)
     enzyme_df['enzyme_mass'] = enzyme_df['Value'] * enzyme_df['MW'] * 1e-3
-    top25 = enzyme_df.nlargest(25, 'enzyme_mass')
+    top10 = enzyme_df.nlargest(10, 'enzyme_mass')
     top_targets = (
-        top25[['Index','enzyme_mass']]
+        top10[['Index','enzyme_mass']]
         .rename(columns={'Index':'Single_gene'})
         .merge(processed_data, on='Single_gene')
         [['Reactions','Single_gene','enzyme_mass','kcat_mean','kcat_std']]
