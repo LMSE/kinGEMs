@@ -5,4 +5,15 @@ python-dotenv
 ruff
 tqdm
 typer
+bioservices
+cobra
+numpy
+pandas
+pubchempy
+requests
+biopython
+pyomo
+seaborn
+ipykernel
+glpk
 -e .
