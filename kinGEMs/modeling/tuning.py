@@ -5,7 +5,7 @@ This module provides simulated annealing functionality to tune kcat parameters
 and optimize the model's performance.
 """
 
-import copy
+import copy  # noqa: F401
 import math  # noqa: F401
 import os
 import random  # noqa: F401
@@ -32,7 +32,8 @@ def simulated_annealing(
     min_temperature=0.01,
     max_iterations=250,
     max_unchanged_iterations=3,
-    change_threshold=0.001
+    change_threshold=0.001,
+    verbose=False,
 ):
     """
     Use simulated annealing to tune kcat values for improved biomass production.
@@ -127,12 +128,13 @@ def simulated_annealing(
             old_k = current_solution[i]
             new_k_hr = get_neighbor(old_k, stds[i])
             new_k = new_k_hr / 3600.0
-            print(f"  {rxn}_{gene}: old kcat = {old_k:.3e}  →  new kcat = {new_k:.3e}")
+            if verbose:
+                print(f"  {rxn}_{gene}: old kcat = {old_k:.3e}  →  new kcat = {new_k:.3e}")
             updated_df = update_kcat(updated_df, rxn, gene, new_k_hr)
 
-        # ANNOTATE & EVALUATE on a clone
-        temp_model = copy.deepcopy(model)
-        temp_model = annotate_model_with_kcat_and_gpr(model=temp_model, df=updated_df)
+        # ANNOTATE & EVALUATE
+        # temp_model = copy.deepcopy(model)
+        temp_model = annotate_model_with_kcat_and_gpr(model=model, df=updated_df)
 
         new_biomass, temp_df_FBA, _, _ = run_optimization_with_dataframe(
             model=temp_model,
@@ -143,11 +145,15 @@ def simulated_annealing(
             save_results=False
         )
         print(f"Proposed biomass = {new_biomass:.6e}")
-
+        
+        # compute change *before* accepting new solutio
+        change = abs(new_biomass - current_biomass) / max(current_biomass, 1e-6)
+        
         # ACCEPT or REJECT
         prob = acceptance_probability(current_biomass, new_biomass, temperature)
         if prob > random.random():
-            print(f"Iteration {iteration}: ACCEPTED (Δ = {new_biomass-current_biomass:.2e})")
+            if verbose:
+                print(f"Iteration {iteration}: ACCEPTED (Δ = {new_biomass-current_biomass:.2e})")
             model = temp_model
             df_FBA = temp_df_FBA
             df_new = updated_df.copy()
@@ -164,13 +170,13 @@ def simulated_annealing(
                 best_solution = current_solution[:]
                 best_df       = df_new.copy()
         else:
-            print(f"Iteration {iteration}: REJECTED (Δ = {new_biomass-current_biomass:.2e})")
+            if verbose:    
+                print(f"Iteration {iteration}: REJECTED (Δ = {new_biomass-current_biomass:.2e})")
 
         iterations.append(iteration)
         biomasses.append(new_biomass)
 
-        # check stagnation
-        change = abs(new_biomass - current_biomass) / (current_biomass or 1)
+        # STAGNATION check uses `change` from above
         if change < change_threshold:
             no_change_counter += 1
             if no_change_counter >= max_unchanged_iterations:

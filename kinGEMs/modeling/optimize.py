@@ -5,6 +5,8 @@ This module provides functions for enzyme-constrained flux balance analysis,
 including core optimization functionality from the original KG03b module.
 """
 
+from collections import Counter  # noqa: F401
+from itertools import product
 import math
 import os
 import re
@@ -12,7 +14,7 @@ import re
 from Bio.SeqUtils import molecular_weight
 import cobra as cb
 from cobra.util.array import create_stoichiometric_matrix
-import numpy as np
+import numpy as np  # noqa: F401
 
 # Troubleshooting infeasible optimization
 # Add this code before running your optimization to diagnose the issue
@@ -22,10 +24,6 @@ from pyomo.environ import *  # noqa: F403
 from pyomo.opt import SolverFactory, SolverStatus, TerminationCondition
 
 from ..config import ensure_dir_exists  # noqa: F401
-from collections import Counter
-from itertools import product
-
-
 
 
 def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=None, 
@@ -592,7 +590,8 @@ def run_optimization4(
     enzyme_upper_bound=0.125,
     enzyme_ratio=True,
     maximization=True,
-    solver_name='glpk'
+    solver_name='glpk',
+    tee=False,
 ):
     """
     Enzyme-constrained FBA via Pyomo, handling:
@@ -605,14 +604,18 @@ def run_optimization4(
     # 1) Load COBRA model
     if isinstance(model, str):
         mod = (
-            cobra.io.read_sbml_model(model)
+            cb.io.read_sbml_model(model)
             if model.endswith(('.xml', '.sbml'))
-            else cobra.io.load_json_model(model)
+            else cb.io.load_json_model(model)
         )
     else:
         mod = model
 
     # 2) Initial flux guess
+
+    mod.objective = objective_reaction
+    print("Model objective:", mod.objective)
+
     cobra_sol = mod.optimize()
     flux0 = cobra_sol.fluxes.to_dict()
 
@@ -634,7 +637,7 @@ def run_optimization4(
     genes = [g.id for g in mod.genes]
     lb = {r.id: r.lower_bound for r in mod.reactions}
     ub = {r.id: r.upper_bound for r in mod.reactions}
-    obj_coef = {r.id: r.objective_coefficient for r in mod.reactions}
+    obj_coef = {r.id: (1.0 if r.id == objective_reaction else 0.0) for r in mod.reactions} #obj_coef = {r.id: r.objective_coefficient for r in mod.reactions}
     met_index = {m: i for i, m in enumerate(mets)}
     rxn_index = {r: j for j, r in enumerate(rxns)}
 
@@ -648,66 +651,66 @@ def run_optimization4(
         dnf_clauses[r.id] = _parse_gpr_to_dnf(tokens)
 
     # 6) Build Pyomo model
-    m = ConcreteModel()
-    m.M = Set(initialize=mets)
-    m.R = Set(initialize=rxns)
-    m.G = Set(initialize=genes)
-    m.K = Set(initialize=[(r, g) for r in rxns for g in genes], dimen=2)
+    m = ConcreteModel()  # noqa: F405
+    m.M = Set(initialize=mets)  # noqa: F405
+    m.R = Set(initialize=rxns)  # noqa: F405
+    m.G = Set(initialize=genes)  # noqa: F405
+    m.K = Set(initialize=[(r, g) for r in rxns for g in genes], dimen=2)  # noqa: F405
 
     # Variables
-    m.v = Var(
+    m.v = Var(  # noqa: F405
         m.R,
-        domain=Reals,
+        domain=Reals,  # noqa: F405
         bounds=lambda mo, j: (lb[j], ub[j]),
         initialize=lambda mo, j: flux0.get(j, 0.0)
     )
-    m.E = Var(m.G, domain=NonNegativeReals, initialize=0.01)
+    m.E = Var(m.G, domain=NonNegativeReals, initialize=0.01)  # noqa: F405
 
     # Mass balance
     def mass_balance(mo, met):
         i = met_index[met]
         return sum(S[i, rxn_index[r]] * mo.v[r] for r in mo.R) == 0
-    m.mass_balance = Constraint(m.M, rule=mass_balance)
+    m.mass_balance = Constraint(m.M, rule=mass_balance)  # noqa: F405
 
     # Objective
-    sense = maximize if maximization else minimize
-    m.obj = Objective(expr=sum(obj_coef[r] * m.v[r] for r in m.R), sense=sense)
+    sense = maximize if maximization else minimize  # noqa: F405
+    m.obj = Objective(expr=sum(obj_coef[r] * m.v[r] for r in m.R), sense=sense)  # noqa: F405
 
     # 6a) AND‐GPR: single or complex
     def and_rule(mo, rxn_id, gene_id):
         clauses = dnf_clauses.get(rxn_id, [])
         if not clauses:
-            return Constraint.Skip
+            return Constraint.Skip  # noqa: F405
         # single enzyme: max kcat
         if len(clauses) == 1 and len(clauses[0]) == 1:
             g = clauses[0][0]
             if gene_id != g:
-                return Constraint.Skip
+                return Constraint.Skip  # noqa: F405
             k_list = kcat_dict.get((rxn_id, g), [])
             if not k_list:
-                return Constraint.Skip
+                return Constraint.Skip  # noqa: F405
             k_val = max(k_list)
             return mo.v[rxn_id] <= k_val * mo.E[g]
         # enzyme complex: avg kcat
         if len(clauses) == 1 and len(clauses[0]) > 1:
             clause = clauses[0]
             if gene_id not in clause:
-                return Constraint.Skip
+                return Constraint.Skip  # noqa: F405
             all_ks = []
             for g in clause:
                 all_ks.extend(kcat_dict.get((rxn_id, g), []))
             if not all_ks:
-                return Constraint.Skip
+                return Constraint.Skip  # noqa: F405
             k_val = sum(all_ks) / len(all_ks)
             return mo.v[rxn_id] <= k_val * mo.E[gene_id]
-        return Constraint.Skip
-    m.kcat_and = Constraint(m.K, rule=and_rule)
+        return Constraint.Skip  # noqa: F405
+    m.kcat_and = Constraint(m.K, rule=and_rule)  # noqa: F405
 
     # 6b) OR‐GPR: isoenzymes
     def iso_rule(mo, rxn_id):
         clauses = dnf_clauses.get(rxn_id, [])
         if len(clauses) <= 1:
-            return Constraint.Skip
+            return Constraint.Skip  # noqa: F405
         terms = []
         for clause in clauses:
             ks = []
@@ -721,9 +724,9 @@ def run_optimization4(
             for g in clause:
                 terms.append(kmin * mo.E[g])
         if not terms:
-            return Constraint.Skip
+            return Constraint.Skip  # noqa: F405
         return mo.v[rxn_id] <= sum(terms)
-    m.kcat_iso = Constraint(m.R, rule=iso_rule)
+    m.kcat_iso = Constraint(m.R, rule=iso_rule)  # noqa: F405
 
     # 6c) Promiscuous enzymes
     def promis_rule(mo, g_id):
@@ -735,9 +738,9 @@ def run_optimization4(
                 for k in kcat_dict.get((r_id, g_id), []):
                     usage.append(mo.v[r_id] / k)
         if not usage:
-            return Constraint.Skip
+            return Constraint.Skip  # noqa: F405
         return sum(usage) <= mo.E[g_id]
-    m.promiscuous = Constraint(m.G, rule=promis_rule)
+    m.promiscuous = Constraint(m.G, rule=promis_rule)  # noqa: F405
 
     # 7) Total enzyme pool / ratio
     if enzyme_ratio:
@@ -745,17 +748,17 @@ def run_optimization4(
             gene_sequences_dict = {}
         mw = {g: (molecular_weight(gene_sequences_dict.get(g, ''), seq_type='protein') or 1e5)
               for g in genes}
-        m.E_ratio = Var(domain=NonNegativeReals, bounds=(0, enzyme_upper_bound))
-        m.total_enzyme = Constraint(
+        m.E_ratio = Var(domain=NonNegativeReals, bounds=(0, enzyme_upper_bound))  # noqa: F405
+        m.total_enzyme = Constraint(  # noqa: F405
             expr=sum(m.E[g] * mw[g] for g in m.G) * 1e-3 <= m.E_ratio
         )
     else:
-        m.E_total = Var(domain=NonNegativeReals, bounds=(0, enzyme_upper_bound))
-        m.total_enzyme = Constraint(expr=sum(m.E[g] for g in m.G) <= m.E_total)
+        m.E_total = Var(domain=NonNegativeReals, bounds=(0, enzyme_upper_bound))  # noqa: F405
+        m.total_enzyme = Constraint(expr=sum(m.E[g] for g in m.G) <= m.E_total)  # noqa: F405
 
     # 8) Solve
     solver = SolverFactory(solver_name)
-    solver.solve(m, tee=False, load_solutions=True)
+    solver.solve(m, tee=tee, load_solutions=True)
 
     # 9) Post-process
     for r in m.R:
@@ -766,7 +769,7 @@ def run_optimization4(
             m.E[g].value = 0.0
 
     # 10) Collect results
-    sol_val = value(m.obj)
+    sol_val = value(m.obj)  # noqa: F405
     records = [('flux', r, m.v[r].value) for r in m.R]
     records += [('enzyme', g, m.E[g].value) for g in m.G]
     df_FBA = pd.DataFrame(records, columns=['Variable','Index','Value'])
@@ -1071,7 +1074,7 @@ def debug_enzyme_constraints_detailed(model, processed_data, objective_reaction)
         Constraint,
         NonNegativeReals,
         Objective,
-        Suffix,
+        Suffix,  # noqa: F401
         Var,
         maximize,
         value,

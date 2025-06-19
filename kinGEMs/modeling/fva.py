@@ -13,7 +13,7 @@ from ..config import ensure_dir_exists
 
 
 def flux_variability_analysis(model, processed_df, biomass_reaction,
-                               output_file=None, enzyme_upper_bound=0.125, enzyme_ratio=True,
+                               output_file=None, enzyme_upper_bound=0.15, enzyme_ratio=True,
                                multi_enzyme_off=False, isoenzymes_off=False,
                                promiscuous_off=False, complexes_off=False):
     """
@@ -76,35 +76,48 @@ def flux_variability_analysis(model, processed_df, biomass_reaction,
     for i, rxn in enumerate(model.reactions):
         print(f"[{i + 1}/{len(model.reactions)}] FVA for: {rxn.id}")
 
+         # Deepcopy model to avoid accumulating changes
+        model_copy_max = model.copy()
+        model_copy_min = model.copy()
+
         # Maximize this reaction
-        flux_max, _, _, _ = run_optimization_with_dataframe(
-            model=model,
-            processed_df=processed_df,
-            objective_reaction=rxn.id,
-            enzyme_upper_bound=enzyme_upper_bound,
-            enzyme_ratio=enzyme_ratio,
-            multi_enzyme_off=multi_enzyme_off,
-            isoenzymes_off=isoenzymes_off,
-            promiscuous_off=promiscuous_off,
-            complexes_off=complexes_off,
-            maximization=True,
-            save_results=False
-        )
+        try:
+            flux_max, _, _, _ = run_optimization_with_dataframe(
+                model=model_copy_max,
+                processed_df=processed_df,
+                objective_reaction=rxn.id,
+                enzyme_upper_bound=enzyme_upper_bound,
+                enzyme_ratio=enzyme_ratio,
+                multi_enzyme_off=multi_enzyme_off,
+                isoenzymes_off=isoenzymes_off,
+                promiscuous_off=promiscuous_off,
+                complexes_off=complexes_off,
+                maximization=True,
+                save_results=False
+            )
+        except Exception as e:
+            print(f"⚠️ Max FVA failed for {rxn.id}: {e}")
+            flux_max = None
+
 
         # Minimize this reaction
-        flux_min, _, _, _ = run_optimization_with_dataframe(
-            model=model,
-            processed_df=processed_df,
-            objective_reaction=rxn.id,
-            enzyme_upper_bound=enzyme_upper_bound,
-            enzyme_ratio=enzyme_ratio,
-            multi_enzyme_off=multi_enzyme_off,
-            isoenzymes_off=isoenzymes_off,
-            promiscuous_off=promiscuous_off,
-            complexes_off=complexes_off,
-            maximization=False,
-            save_results=False
-        )
+        try:
+            flux_min, _, _, _ = run_optimization_with_dataframe(
+                model=model_copy_min,
+                processed_df=processed_df,
+                objective_reaction=rxn.id,
+                enzyme_upper_bound=enzyme_upper_bound,
+                enzyme_ratio=enzyme_ratio,
+                multi_enzyme_off=multi_enzyme_off,
+                isoenzymes_off=isoenzymes_off,
+                promiscuous_off=promiscuous_off,
+                complexes_off=complexes_off,
+                maximization=False,
+                save_results=False
+            )
+        except Exception as e:
+            print(f"⚠️ Min FVA failed for {rxn.id}: {e}")
+            flux_min = None
 
         reaction_ids.append(rxn.id)
         max_fluxes.append(flux_max)
