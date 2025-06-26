@@ -504,7 +504,9 @@ def flux_variability_analysis_parallel(model, processed_df, biomass_reaction,
     """
     # Spin up a local Dask client (optional; if you omit this, compute() will
     # use threads by default)
-    client = Client(n_workers or os.cpu_count())
+    client = Client(n_workers=(n_workers or os.cpu_count()),
+                processes=True,      # optional: use separate processes
+                threads_per_worker=1)  # you can tune this
     
     # 1) baseline FBA to fix biomass
     from .optimize import run_optimization_with_dataframe
