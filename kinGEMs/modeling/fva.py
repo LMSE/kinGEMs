@@ -13,7 +13,7 @@ from ..config import ensure_dir_exists
 
 
 def flux_variability_analysis(model, processed_df, biomass_reaction,
-                               output_file=None, enzyme_upper_bound=0.15, enzyme_ratio=True,
+                               output_file=None, enzyme_upper_bound=0.15, opt_ratio=0.9, enzyme_ratio=True,
                                multi_enzyme_off=False, isoenzymes_off=False,
                                promiscuous_off=False, complexes_off=False):
     """
@@ -65,8 +65,8 @@ def flux_variability_analysis(model, processed_df, biomass_reaction,
 
     # Step 2: Fix biomass value
     biomass_rxn = model.reactions.get_by_id(biomass_reaction)
-    biomass_rxn.lower_bound = solution_biomass
-    biomass_rxn.upper_bound = solution_biomass
+    biomass_rxn.lower_bound = solution_biomass * opt_ratio
+    # biomass_rxn.upper_bound = solution_biomass
 
     # Step 3: Run FVA
     min_fluxes = []

@@ -39,7 +39,8 @@ TAXONOMY_IDS = {
     'Yeast': 4932,    # Taxonomy ID for S. cerevisiae
     'S elongatus': 1140,  # Taxonomy ID for S. elongatus PCC 7942: https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=1140
     'P putida': 160488, # Taxonomy ID for P. putida KT2440: https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=160488
-    # Add more organisms as needed
+    'B ovatus': 28116 , # Taxonomy ID for B. ovatus: https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?mode=Info&id=28116
+      # Add more organisms as needed
 }
 
 # Helper function to ensure a directory exists

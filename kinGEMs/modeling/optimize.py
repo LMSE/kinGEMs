@@ -601,7 +601,16 @@ def run_optimization4(
       - promiscuous enzymes
     Returns: sol_val, df_FBA, gene_sequences_dict, model
     """
+    import logging
     import time  # Add this import
+
+    import gurobipy as gp
+
+    # 1) Silence the gurobipy Python logger
+    logging.getLogger('gurobipy').setLevel(logging.ERROR)
+
+    # 2) Globally mute Pyomo solver chatter
+    logging.getLogger('pyomo').setLevel(logging.WARNING)
     
     total_start = time.time()
     
@@ -819,6 +828,9 @@ def run_optimization4(
     # 8) Solve
     # print("Step 8: Setting up and running solver...")
     solver = SolverFactory(solver_name)
+    solver.options['LogToConsole'] = 0
+    solver.options['OutputFlag']   = 0
+    solver.options['LogFile']      = ''
     #solver.options['threads'] = 4
     # print("Solver:", solver)
     # print(f"Solver options: {dict(solver.options)}")
