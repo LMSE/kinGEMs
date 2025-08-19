@@ -11,6 +11,15 @@ import pandas as pd
 
 from ..config import ensure_dir_exists
 
+import warnings
+warnings.filterwarnings('ignore')
+import logging
+logging.getLogger('distributed').setLevel(logging.ERROR)
+try:
+    import gurobipy
+    gurobipy.setParam('OutputFlag', 0)
+except ImportError:
+    pass
 
 def flux_variability_analysis(model, processed_df, biomass_reaction,
                                output_file=None, enzyme_upper_bound=0.15, opt_ratio=0.9, enzyme_ratio=True,
@@ -76,7 +85,7 @@ def flux_variability_analysis(model, processed_df, biomass_reaction,
     for i, rxn in enumerate(model.reactions):
         print(f"[{i + 1}/{len(model.reactions)}] FVA for: {rxn.id}")
 
-         # Deepcopy model to avoid accumulating changes
+        # Deepcopy model to avoid accumulating changes
         model_copy_max = model.copy()
         model_copy_min = model.copy()
 
@@ -99,7 +108,6 @@ def flux_variability_analysis(model, processed_df, biomass_reaction,
             print(f"⚠️ Max FVA failed for {rxn.id}: {e}")
             flux_max = None
 
-
         # Minimize this reaction
         try:
             flux_min, _, _, _ = run_optimization_with_dataframe(
@@ -119,6 +127,9 @@ def flux_variability_analysis(model, processed_df, biomass_reaction,
             print(f"⚠️ Min FVA failed for {rxn.id}: {e}")
             flux_min = None
 
+        print(f"Reaction: {rxn.id} | Min Solution: {flux_min} | Max Solution: {flux_max}")
+
+        print(f"Reaction: {rxn.id} | Min Solution: {flux_min} | Max Solution: {flux_max}")
         reaction_ids.append(rxn.id)
         max_fluxes.append(flux_max)
         min_fluxes.append(flux_min)
@@ -450,6 +461,7 @@ def _fva_for_reaction(model, processed_df,
     # restore the fixed‐biomass bounds
     biomass_rxn = model.reactions.get_by_id(biomass_rxn_bounds[0])
     biomass_rxn.lower_bound, biomass_rxn.upper_bound = biomass_rxn_bounds[1:]
+    print(f"[FVA] Starting optimization for reaction: {rxn_id}")
     
     # copy model twice so we don’t clobber bounds
     m_max, m_min = model.copy(), model.copy()
@@ -468,10 +480,12 @@ def _fva_for_reaction(model, processed_df,
             complexes_off=complexes_off,
             maximization=True,
             save_results=False,
+            verbose=False
         )
+        print(f"[FVA] Max optimization done for {rxn_id}: {flux_max}")
     except Exception:
         flux_max = None
-    
+
     # minimize
     try:
         flux_min, *_ = run_optimization_with_dataframe(
@@ -486,10 +500,13 @@ def _fva_for_reaction(model, processed_df,
             complexes_off=complexes_off,
             maximization=False,
             save_results=False,
+            verbose=False
         )
+        print(f"[FVA] Min optimization done for {rxn_id}: {flux_min}")
     except Exception:
         flux_min = None
 
+    print(f"[FVA] Finished optimization for reaction: {rxn_id}")
     return rxn_id, flux_min, flux_max
 
 # 2) Your FVA, rewritten to launch in parallel:
@@ -542,6 +559,13 @@ def flux_variability_analysis_parallel(model, processed_df, biomass_reaction,
 
     # 3) compute in parallel
     results = compute(*tasks)  # by default uses the Client’s cluster
+
+    # Print condensed summary of min and max solution values for each reaction
+    print("\nFVA Results (Reaction | Min | Max):")
+    print("{:<20} {:>12} {:>12}".format("Reaction", "Min", "Max"))
+    print("-" * 46)
+    for rxn_id, min_val, max_val in results:
+        print("{:<20} {:>12.4g} {:>12.4g}".format(rxn_id, min_val if min_val is not None else float('nan'), max_val if max_val is not None else float('nan')))
 
     # 4) stitch results back into a DataFrame
     reaction_ids, min_vals, max_vals = zip(*results)

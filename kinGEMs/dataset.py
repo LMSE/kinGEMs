@@ -12,7 +12,6 @@ import re  # noqa: F401
 import time  # noqa: F401
 import urllib
 import urllib.error
-from urllib.error import HTTPError
 from urllib.parse import quote  # noqa: F401
 from urllib.request import urlopen  # noqa: F401
 
@@ -23,14 +22,12 @@ from cobra.util.solver import set_objective
 import numpy as np
 import pandas as pd
 import pubchempy as pcp  # noqa: F401
-import requests
 
 from .config import (
     CHEBI_COMPOUNDS,
     CHEBI_INCHI,
     METANETX_COMPOUNDS,
     METANETX_XREF,
-    REST_DATASETS,
     SEED_COMPOUNDS,
     TAXONOMY_IDS,
     BiGG_MAPPING,
@@ -60,6 +57,47 @@ def load_model(model_path):
     except Exception as e:
         raise ValueError(f"Error loading model: {e}")
 
+# def convert_to_irreversible(model):
+#     """
+#     Convert a reversible COBRA model to irreversible form.
+#     Splits reversible and exchange reactions into forward and reverse.
+#     """
+#     model_irrev = model.copy()
+#     reactions_to_add = []
+
+#     # Process non-exchange reactions
+#     non_ex = [rxn for rxn in model_irrev.reactions if rxn not in model_irrev.exchanges]
+#     for rxn in non_ex:
+#         if rxn.reversibility:
+#             rev_id = rxn.id + '_reverse'
+#             if rev_id not in model_irrev.reactions:
+#                 orig_lb, orig_ub = rxn.lower_bound, rxn.upper_bound
+#                 # Make original irreversible
+#                 rxn.lower_bound = max(0, orig_lb)
+#                 rxn.upper_bound = max(0, orig_ub)
+#                 # Create reverse reaction
+#                 rev = Reaction(rev_id)
+#                 rev.lower_bound = 0
+#                 rev.upper_bound = max(0, -orig_lb)
+#                 rev.add_metabolites({m: -c for m,c in rxn.metabolites.items()})
+#                 rev.gene_reaction_rule = rxn.gene_reaction_rule
+#                 reactions_to_add.append(rev)
+
+#     # Process exchange reactions
+#     for ex in model_irrev.exchanges:
+#         rev_ex_id = ex.id + '_reverse'
+#         if rev_ex_id not in model_irrev.reactions:
+#             orig_lb = ex.lower_bound
+#             ex.lower_bound = max(0, orig_lb)
+#             rev_ex = Reaction(rev_ex_id)
+#             rev_ex.lower_bound = 0
+#             rev_ex.upper_bound = max(0, -orig_lb)
+#             rev_ex.add_metabolites({m: -c for m,c in ex.metabolites.items()})
+#             rev_ex.gene_reaction_rule = ex.gene_reaction_rule
+#             reactions_to_add.append(rev_ex)
+
+#     model_irrev.add_reactions(reactions_to_add)
+#     return model_irrev
 
 def convert_to_irreversible(model):
         """
@@ -155,176 +193,228 @@ def get_substrate_metabolites(reaction):
     substrates = [met.id for met in reaction.reactants]
     return substrates
 
-
-def get_smiles_from_modelseed(cmpd_id, seed_comps_df):
-    """
-    Retrieve SMILES for a ModelSEED compound ID from a local DataFrame,
-    falling back to the ModelSEED REST API if not found locally.
-    """
-    # 1) Local lookup
-    hit = seed_comps_df.loc[seed_comps_df['id'] == cmpd_id]
-    if not hit.empty:
-        return hit.iloc[0].get('smiles')
-    # 2) REST API fallback
-    try:
-        url = f"https://modelseed.org/biochem/compounds/{cmpd_id}.json"
-        resp = requests.get(url, timeout=5)
-        if resp.ok:
-            return resp.json().get('smiles')
-    except Exception:
-        pass
-    return None
-
 def map_metabolites(substrate_df, external_db_dir=None, max_retries=3, retry_delay=2):
     """
-    Map metabolites to SMILES structures using external databases, including ModelSEED.
+    Map metabolites to SMILES structures using external databases.
     
-    New in this version:
-    - Strips any "_c<digit>" compartment suffix before lookups.
-    - Uses low_memory=False when reading SEED_COMPOUNDS to avoid mixed-type warnings.
+    Parameters
+    ----------
+    substrate_df : pandas.DataFrame
+        DataFrame with substrate information
+    external_db_dir : str, optional
+        Directory containing external database files. If None, uses default.
+    max_retries : int, optional
+        Maximum number of retries for web service requests. Default is 3.
+    retry_delay : int, optional
+        Delay between retries in seconds. Default is 2.
+        
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with added SMILES information
     """
-    # configure logger
-    logging.basicConfig(level=logging.INFO,
+    import logging
+    import os
+    import re  # noqa: F811
+    import time  # noqa: F401, F811
+    from urllib.error import HTTPError  # noqa: F401
+
+    import numpy as np
+    import pandas as pd
+    
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, 
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
-
-    # locate database files
+    
+    # Load database files
     if external_db_dir is None:
         external_db_dir = os.path.dirname(BiGG_MAPPING)
-
-    BiGG_comps        = pd.read_csv(BiGG_MAPPING)
-    CHEBI_comps       = pd.read_csv(CHEBI_COMPOUNDS, sep='\t')
-    CHEBIInChI_comps  = pd.read_csv(CHEBI_INCHI, sep='\t')
-    MetaNetX_comps    = pd.read_csv(METANETX_COMPOUNDS, sep='\t')
-    MetaNetX_refcomps = pd.read_csv(METANETX_XREF, sep='\t')
-    SEED_comps        = pd.read_csv(SEED_COMPOUNDS, sep='\t', low_memory=False)
-
-    # initialize output
+    
+    # Load database files
+    BiGG_comps = pd.read_csv(BiGG_MAPPING)
+    CHEBI_comps = pd.read_csv(CHEBI_COMPOUNDS, sep='\t')  # noqa: F841
+    CHEBIInChI_comps = pd.read_csv(CHEBI_INCHI, sep='\t')
+    MetaNetX_comps = pd.read_csv(METANETX_COMPOUNDS, sep='\t')
+    MetaNetX_refcomps = pd.read_csv(METANETX_XREF, sep='\t')  # noqa: F841
+    SEED_comps = pd.read_csv(SEED_COMPOUNDS, sep='\t')
+    
+    # Initialize new columns
     df = substrate_df.copy()
-    df['SMILES']     = np.nan
-    df['BiGG Name']  = np.nan
-    df['DB Name']    = np.nan
-    df['Cleaned']    = df['Substrate partner'].apply(clean_metabolite_names)
+    df['SMILES'] = np.nan
+    df['BiGG Name'] = np.nan
+    df['DB Name'] = np.nan
 
-    unique_substrates_df = df[['Substrate partner', 'Cleaned']].drop_duplicates()
+    # Clean substrate names before processing
+    df['Cleaned Substrate'] = df['Substrate partner'].apply(clean_metabolite_names)
+
+    # Get unique substrates with their details
+    unique_substrates_df = df[['Substrate partner', 'Cleaned Substrate']].drop_duplicates()
     logger.info(f"There are {len(unique_substrates_df)} substrates in the GEM.")
 
-    smiles_mapping    = {}
+    # Prepare for tracking SMILES and names
+    smiles_mapping = {}
     bigg_name_mapping = {}
-    db_name_mapping   = {}
+    db_name_mapping = {}
 
-    # preprocess BiGG old IDs
+    # Expand old_bigg_ids to create a list for comparison
     BiGG_comps['old_bigg_ids_list'] = BiGG_comps['old_bigg_ids'].str.split(';')
-    BiGG_expl = BiGG_comps.explode('old_bigg_ids_list').reset_index(drop=True)
+    BiGG_comps_expl = BiGG_comps.explode('old_bigg_ids_list')
+    BiGG_comps_unique = BiGG_comps.reset_index(drop=True)
+    BiGG_comps_expl_unique = BiGG_comps_expl.reset_index(drop=True)
 
+    # Iterate through each unique substrate
     for _, row in unique_substrates_df.iterrows():
-        raw_id   = row['Substrate partner']
-        cleaned  = row['Cleaned']
-        logger.info(f"Mapping substrate: {raw_id}")
+        substrate = row['Substrate partner']
+        cleaned_substrate = row['Cleaned Substrate']
+        logger.info('-----------------------------')
+        logger.info(f'Mapping substrate: {substrate}')
 
-        # strip trailing "_c<digit>" (e.g. compartment suffix)
-        base_id = re.sub(r'_[a-z]\d+$', '', raw_id)
-
-        # --- ModelSEED lookup on base_id first ---
-        if isinstance(base_id, str) and base_id.startswith('cpd'):
-            smiles = get_smiles_from_modelseed(base_id, SEED_comps)
-            if smiles:
-                smiles_mapping[raw_id]  = smiles
-                db_name_mapping[raw_id] = base_id
-                logger.info(f"Found SMILES in ModelSEED for {base_id}: {smiles}")
-                continue
-
-        # --- BiGG database lookup on base_id ---
-        pattern = fr'\b{re.escape(base_id)}\b'
-        bigg_hit = BiGG_comps.loc[
-            BiGG_comps['bigg_id'].str.contains(pattern, regex=True, case=False) |
-            BiGG_comps['universal_bigg_id'].str.contains(pattern, regex=True, case=False) |
-            BiGG_expl['old_bigg_ids_list'].str.contains(pattern, regex=True, case=False)
+        # Search in BiGG database
+        bigg_hit = BiGG_comps_unique.loc[
+            BiGG_comps_unique['bigg_id'].str.contains(fr'\b{re.escape(substrate)}\b', regex=True, case=False) |
+            BiGG_comps_unique['universal_bigg_id'].str.contains(fr'\b{re.escape(substrate)}\b', regex=True, case=False) |
+            BiGG_comps_expl_unique['old_bigg_ids_list'].str.contains(fr'\b{re.escape(substrate)}\b', regex=True, case=False)
         ].head(1)
 
         if not bigg_hit.empty:
             name = bigg_hit['name'].values[0]
-            bigg_name_mapping[raw_id] = name
+            bigg_name_mapping[substrate] = name
             logger.info(f"BiGG Name: {name}")
 
-            # MetaNetX via BiGG cross-ref
-            mnx_id = bigg_hit['MetaNetX'].values[0]
-            if pd.notna(mnx_id):
-                mnh = MetaNetX_comps[MetaNetX_comps['ID'] == mnx_id]
-                if not mnh.empty and pd.notna(mnh['SMILES'].values[0]):
-                    smiles_mapping[raw_id]  = mnh['SMILES'].values[0]
-                    db_name_mapping[raw_id] = mnh['name'].values[0]
-                    logger.info(f"SMILES found in MetaNetX: {mnh['SMILES'].values[0]}")
-                    continue
-
-            # SEED via BiGG cross-ref
-            seed_id = bigg_hit['SEED'].values[0]
-            if pd.notna(seed_id):
-                sh = SEED_comps.loc[SEED_comps['id'] == seed_id]
-                if not sh.empty and 'smiles' in sh.columns and pd.notna(sh['smiles'].values[0]):
-                    smiles_mapping[raw_id]  = sh['smiles'].values[0]
-                    db_name_mapping[raw_id] = sh['name'].values[0]
-                    logger.info(f"SMILES found in SEED: {sh['smiles'].values[0]}")
-                    continue
-
-            # ChEBI via BiGG cross-ref
-            chebi_ref = str(bigg_hit['CHEBI'].values[0])
-            if pd.notna(chebi_ref):
-                ch = CHEBIInChI_comps[CHEBIInChI_comps['CHEBI_ID'].astype(str)
-                                      .str.contains(fr'\b{re.escape(chebi_ref)}\b', case=False, regex=True)]
-                if not ch.empty:
-                    inchi = ch['InChI'].values[0]
-                    mh = MetaNetX_comps[MetaNetX_comps['InChI'] == inchi]
-                    if not mh.empty and pd.notna(mh['SMILES'].values[0]):
-                        smiles_mapping[raw_id]  = mh['SMILES'].values[0]
-                        db_name_mapping[raw_id] = mh['name'].values[0]
-                        logger.info(f"SMILES found in ChEBI: {mh['SMILES'].values[0]}")
+            # Check MetaNetX for SMILES
+            if not bigg_hit['MetaNetX'].isna().all():
+                metanetx_hit = MetaNetX_comps[MetaNetX_comps['ID'] == bigg_hit['MetaNetX'].values[0]]
+                if not metanetx_hit.empty:
+                    smiles = metanetx_hit['SMILES'].values[0]
+                    if pd.notna(smiles):
+                        smiles_mapping[substrate] = smiles
+                        db_name_mapping[substrate] = metanetx_hit['name'].values[0]
+                        logger.info(f"SMILES found in MetaNetX: {smiles}")
                         continue
-
-        # --- Direct fallback if no BiGG hit ---
+            
+            # Check SEED database
+            if not bigg_hit['SEED'].isna().all():
+                seed_hit = SEED_comps[SEED_comps['id'] == bigg_hit['SEED'].values[0]]
+                if not seed_hit.empty:
+                    smiles = seed_hit['smiles'].values[0] if 'smiles' in seed_hit else np.nan
+                    name = seed_hit['name'].values[0]
+                    if pd.notna(smiles):
+                        smiles_mapping[substrate] = smiles
+                        db_name_mapping[substrate] = name
+                        logger.info(f"SMILES found in SEED: {smiles}")
+                        continue
+            
+            # Check CHEBI database
+            if not bigg_hit['CHEBI'].isna().all():
+                try:
+                    chebi_hit = CHEBIInChI_comps[CHEBIInChI_comps['CHEBI_ID'].str.contains(
+                        fr'\b{re.escape(bigg_hit["CHEBI"].values[0])}\b', regex=True, case=False)]
+                except AttributeError:
+                    # If string methods fail, convert to string first
+                    CHEBIInChI_comps['CHEBI_ID'] = CHEBIInChI_comps['CHEBI_ID'].astype(str)
+                    chebi_hit = CHEBIInChI_comps[CHEBIInChI_comps['CHEBI_ID'].str.contains(
+                        fr'\b{re.escape(bigg_hit["CHEBI"].values[0])}\b', regex=True, case=False)]
+                
+                if not chebi_hit.empty:
+                    inchi = chebi_hit['InChI'].values[0]
+                    inchi_hit = MetaNetX_comps[MetaNetX_comps['InChI'] == inchi]
+                    if not inchi_hit.empty:
+                        smiles = inchi_hit['SMILES'].values[0]
+                        name = inchi_hit['name'].values[0]
+                        if pd.notna(smiles):
+                            smiles_mapping[substrate] = smiles
+                            db_name_mapping[substrate] = name
+                            logger.info(f"SMILES found in ChEBI: {smiles}")
+                            continue
+        
+        # If no BiGG hit, check other databases directly
         else:
-            logger.info("No BiGG match; checking MetaNetX and SEED directly.")
-            pattern = fr'\b{re.escape(base_id)}\b'
+            logger.info("No BiGG match found, checking other databases...")
+            
+            # Check MetaNetX directly
+            metanetx_hit = MetaNetX_comps[MetaNetX_comps['ID'].str.contains(
+                fr'\b{re.escape(substrate)}\b', regex=True, case=False)]
+            if not metanetx_hit.empty:
+                name = metanetx_hit['name'].values[0]
+                smiles = metanetx_hit['SMILES'].values[0] if 'SMILES' in metanetx_hit.columns else np.nan
+                if pd.notna(smiles):
+                    smiles_mapping[substrate] = smiles
+                    db_name_mapping[substrate] = name
+                    logger.info(f"MetaNetX match: {name}")
+                    continue
+            
+            # Check SEED
+            seed_hit = SEED_comps[SEED_comps['id'].str.contains(
+                fr'\b{re.escape(substrate)}\b', regex=True, case=False)]
+            if not seed_hit.empty:
+                name = seed_hit['name'].values[0]
+                smiles = seed_hit['smiles'].values[0] if 'smiles' in seed_hit.columns else np.nan
+                if pd.notna(smiles):
+                    smiles_mapping[substrate] = smiles
+                    db_name_mapping[substrate] = name
+                    logger.info(f"SEED match: {name}")
+                    continue
 
-            mnx = MetaNetX_comps[MetaNetX_comps['ID'].str.contains(pattern, regex=True, case=False)]
-            if not mnx.empty and pd.notna(mnx['SMILES'].values[0]):
-                smiles_mapping[raw_id]  = mnx['SMILES'].values[0]
-                db_name_mapping[raw_id] = mnx['name'].values[0]
-                logger.info(f"MetaNetX match: {mnx['name'].values[0]}")
+    # If SMILES is still missing, try to get from web services
+    missing_substrates = [sub for sub in df['Substrate partner'].unique() if sub not in smiles_mapping]
+    
+    for substrate in missing_substrates:
+        # First, check alternative databases directly
+        metanetx_hit = MetaNetX_comps[MetaNetX_comps['ID'].str.contains(
+            fr'\b{re.escape(substrate)}\b', regex=True, case=False)]
+        if not metanetx_hit.empty:
+            smiles = metanetx_hit['SMILES'].values[0] if 'SMILES' in metanetx_hit.columns else np.nan
+            if pd.notna(smiles):
+                smiles_mapping[substrate] = smiles
+                db_name_mapping[substrate] = metanetx_hit['name'].values[0]
+                logger.info(f"Found SMILES in MetaNetX for {substrate}: {smiles}")
                 continue
 
-            sd = SEED_comps[SEED_comps['id'].astype(str).str.contains(pattern, regex=True, case=False)]
-            if not sd.empty and 'smiles' in sd.columns and pd.notna(sd['smiles'].values[0]):
-                smiles_mapping[raw_id]  = sd['smiles'].values[0]
-                db_name_mapping[raw_id] = sd['name'].values[0]
-                logger.info(f"SEED match: {sd['name'].values[0]}")
+        seed_hit = SEED_comps[SEED_comps['id'].str.contains(
+            fr'\b{re.escape(substrate)}\b', regex=True, case=False)]
+        if not seed_hit.empty:
+            smiles = seed_hit['smiles'].values[0] if 'smiles' in seed_hit.columns else np.nan
+            if pd.notna(smiles):
+                smiles_mapping[substrate] = smiles
+                db_name_mapping[substrate] = seed_hit['name'].values[0]
+                logger.info(f"Found SMILES in SEED for {substrate}: {smiles}")
                 continue
 
-        # --- Web services for anything still missing ---
-        for name in (cleaned, base_id, raw_id):
-            if not name or pd.isna(name):
-                continue
-            smiles = get_SMILES_with_retries(name, service='cactus',
-                                             max_retries=max_retries, retry_delay=retry_delay)
-            if smiles:
-                smiles_mapping[raw_id] = smiles
-                logger.info(f"Found SMILES via Cactus for {name}: {smiles}")
-                break
-            smiles_list = get_SMILES_with_retries(name, service='pubchem',
-                                                  max_retries=max_retries, retry_delay=retry_delay)
-            if smiles_list:
-                smiles_mapping[raw_id] = smiles_list[0]
-                logger.info(f"Found SMILES via PubChem for {name}: {smiles_list[0]}")
-                break
+        # Prepare for web service search
+        cleaned_substrate = df.loc[df['Substrate partner'] == substrate, 'Cleaned Substrate'].iloc[0]
+        logger.info('-----------------------------')
+        logger.info(f'Mapping substrate: {substrate}')
+        
+        # Try searches with both original and cleaned names
+        names_to_try = [cleaned_substrate, substrate]
+        
+        for name in names_to_try:
+            if pd.notna(name):
+                # Try CIR with retries
+                smiles = get_SMILES_with_retries(name, service='cactus', max_retries=max_retries, retry_delay=retry_delay)
+                if smiles:
+                    smiles_mapping[substrate] = smiles
+                    logger.info(f"Found SMILES via Cactus for {name}: {smiles}")
+                    break
+                else:
+                    # Try PubChem with retries
+                    smiles_list = get_SMILES_with_retries(name, service='pubchem', max_retries=max_retries, retry_delay=retry_delay)
+                    if smiles_list and len(smiles_list) > 0:
+                        smiles_mapping[substrate] = smiles_list[0]
+                        logger.info(f"Found SMILES via PubChem for {name}: {smiles_list[0]}")
+                        break
 
-    # apply mappings back to DataFrame
-    for raw_id, smi in smiles_mapping.items():
-        df.loc[df['Substrate partner'] == raw_id, 'SMILES'] = smi
-    for raw_id, bn in bigg_name_mapping.items():
-        df.loc[df['Substrate partner'] == raw_id, 'BiGG Name'] = bn
-    for raw_id, dn in db_name_mapping.items():
-        df.loc[df['Substrate partner'] == raw_id, 'DB Name'] = dn
-
+    # Apply mappings back to the dataframe
+    for substrate, smiles in smiles_mapping.items():
+        df.loc[df['Substrate partner'] == substrate, 'SMILES'] = smiles
+    
+    for substrate, bigg_name in bigg_name_mapping.items():
+        df.loc[df['Substrate partner'] == substrate, 'BiGG Name'] = bigg_name
+    
+    for substrate, db_name in db_name_mapping.items():
+        df.loc[df['Substrate partner'] == substrate, 'DB Name'] = db_name
+    
     return df
 
 
@@ -521,163 +611,119 @@ def clean_metabolite_names(name):
     
     return name
 
-# Helper: map a GI number to a UniProt KB accession via the REST idmapping service
-def map_gi_to_uniprot(gi):
-    try:
-        payload = {'from':'P_GI','to':'UniProtKB','ids':gi}
-        r = requests.post('https://rest.uniprot.org/idmapping/run', data=payload)
-        job = r.json().get('jobId')
-        # poll status
-        status = None
-        while status != 'FINISHED':
-            status = requests.get(f'https://rest.uniprot.org/idmapping/status/{job}') \
-                             .json().get('jobStatus')
-        res = requests.get(f'https://rest.uniprot.org/idmapping/uniprotkb/results/{job}')
-        hits = res.json().get('results', [])
-        return hits[0]['to'] if hits else None
-    except Exception as e:
-        logging.warning(f"GI→UniProt mapping failed for {gi}: {e}")
-        return None
-
-# Main function
-def retrieve_sequences(model,
-                       organism=None,
-                       metadata_dir=None,
-                       output_path=None,
-                       use_taxonomy=True):
+def retrieve_sequences(model, organism, output_path=None):
     """
-    Retrieve protein sequences for genes in a model, choosing the correct
-    database based on qseqid prefix:
-      - UniRef clusters (UniRef50_/UniRef90_/...) via UniRef endpoint
-      - Swiss-Prot (sp|) and TrEMBL (tr|) via UniProtKB with reviewed filter
-      - TC-DB (gnl|TC-DB|...) via TCDB FASTA endpoint
-      - GenBank GI (gi|) via idmapping → UniProtKB
-      - fallback to gene_exact search in UniProtKB
+    Retrieve protein sequences for genes in a model using UniProt web service.
+    
+    Parameters
+    ----------
+    model : cobra.Model or str
+        COBRA model object or path to model file
+    organism : str
+        Organism name (e.g., 'E coli', 'Yeast')
+    output_path : str, optional
+        Path to save sequence data
+        
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with gene IDs and sequences
     """
-    # load model
+    # Load model if string
     if isinstance(model, str):
         model = load_model(model)
-
-    # resolve taxonomy if desired
-    taxon_ID = None
-    if use_taxonomy:
-        if organism not in TAXONOMY_IDS:
-            raise ValueError(f"Unknown organism '{organism}'")
+    
+    # Get taxonomy ID
+    if organism in TAXONOMY_IDS:
         taxon_ID = TAXONOMY_IDS[organism]
-
-    # build gene->qseqid map
-    qseqid_map = {}
-    if metadata_dir:
-        if os.path.isfile(metadata_dir):
-            dfm = pd.read_csv(metadata_dir)
-            if {'gene','qseqid'}.issubset(dfm.columns):
-                dfm['gene'] = dfm['gene'].astype(str).str.replace(':','_')
-                qseqid_map = dict(zip(dfm['gene'], dfm['qseqid']))
-        elif os.path.isdir(metadata_dir):
-            for fn in os.listdir(metadata_dir):
-                if fn.endswith('.csv'):
-                    dfm = pd.read_csv(os.path.join(metadata_dir,fn))
-                    if {'gene','qseqid'}.issubset(dfm.columns):
-                        dfm['gene'] = dfm['gene'].astype(str).str.replace(':','_')
-                        qseqid_map = dict(zip(dfm['gene'], dfm['qseqid']))
-                        break
-        else:
-            raise ValueError(f"metadata_dir {metadata_dir} invalid")
-
-    def fetch_uniref(cluster_id):
-        url = f"https://rest.uniprot.org/uniref/{cluster_id}.fasta"
-        r = requests.get(url, timeout=10)
-        return r.text if r.status_code==200 else None
-
-    def fetch_tcdb(tc_id):
-        url = f"http://www.tcdb.org/cgi-bin/search-fasta?tc={tc_id}"
-        r = requests.get(url, timeout=10)
-        return r.text if r.status_code==200 and r.text.startswith('>') else None
-
-    def fetch_uniprotkb(accession, reviewed=None):
-        term = f"accession:({accession})"
-        if reviewed is True:
-            term += " AND reviewed:true"
-        elif reviewed is False:
-            term += " AND reviewed:false"
-        if use_taxonomy and taxon_ID:
-            term += f" AND taxonomy_id:({taxon_ID})"
-        params = {'query': term, 'format': 'fasta'}
-        r = requests.get('https://rest.uniprot.org/uniprotkb/search', params=params, timeout=10)
-        return r.text if r.status_code==200 and r.text else None
-
-    def fetch_gene_exact(gene):
-        term = f"gene_exact:({gene})"
-        if use_taxonomy and taxon_ID:
-            term += f" AND taxonomy_id:({taxon_ID})"
-        params = {'query': term, 'format': 'fasta'}
-        r = requests.get('https://rest.uniprot.org/uniprotkb/search', params=params, timeout=10)
-        return r.text if r.status_code==200 and r.text else None
-
-    def get_sequence(gene_id, raw_q):
-        seq = None
-        # UniRef cluster
-        if isinstance(raw_q, str) and raw_q.startswith('UniRef'):
-            # use full cluster ID (e.g. UniRef90_A8AFT6)
-            print("UniProt, raw_q", raw_q)
-            fasta = fetch_uniref(raw_q)
-            if fasta:
-                seq = fasta.split('\n', 1)[1].replace('\n', '').strip()
-            else:
-                logging.warning(f"UniRef miss for {gene_id} ({raw_q})")
-        # Swiss-Prot or TrEMBL
-        elif isinstance(raw_q, str) and raw_q.startswith(('sp|','tr|')):
-            acc = raw_q.split('|')[1]
-            reviewed = raw_q.startswith('sp|')
-            print("SP, TR: acc, reviewed", acc, reviewed)
-            fasta = fetch_uniprotkb(acc, reviewed)
-            if fasta:
-                seq = fasta.split('\n',1)[1].replace('\n','').strip()
-            else:
-                logging.warning(f"UniProtKB miss for {gene_id} ({raw_q})")
-        # TC-DB
-        elif isinstance(raw_q, str) and raw_q.startswith('gnl|'):
-            tc = raw_q.split('|')[2]
-            print("TCDB: tc", tc)
-            fasta = fetch_tcdb(tc)
-            if fasta:
-                seq = fasta.split('\n',1)[1].replace('\n','').strip()
-            else:
-                logging.warning(f"TCDB miss for {gene_id} ({raw_q})")
-        # GI number
-        elif isinstance(raw_q, str) and raw_q.startswith('gi|'):
-            gi = raw_q.split('|')[3]
-            print("GI: gi", gi)
-            up = map_gi_to_uniprot(gi)
-            if up:
-                fasta = fetch_uniprotkb(up)
-                if fasta:
-                    seq = fasta.split('\n',1)[1].replace('\n','').strip()
-            if not seq:
-                logging.warning(f"GI→UniProt miss for {gene_id} ({gi})")
-        # fallback: gene exact search
-        if seq is None:
-            fasta = fetch_gene_exact(gene_id)
-            if fasta:
-                seq = fasta.split('\n',1)[1].replace('\n','').strip()
-            else:
-                logging.warning(f"Gene_exact miss for {gene_id}")
-        return seq
-
-    # build DataFrame
-    rows = []
-    for g in model.genes:
-        rows.append({'Single_gene':g.id, 'Name':g.name, 'qseqid':qseqid_map.get(g.id)})
-    df = pd.DataFrame(rows)
-    df['Sequence'] = df.apply(lambda r: get_sequence(r['Single_gene'], r['qseqid']), axis=1)
-
+    else:
+        raise ValueError(f"Unknown organism '{organism}'. Available options: {list(TAXONOMY_IDS.keys())}")
+    
+    # Helper functions
+    def extract_genes(gpr_rules):
+        """Extract individual genes from a GPR rule."""
+        genes = []
+        for rule in gpr_rules.split(' and '):
+            sub_genes = rule.split(' or ')
+            for gene in sub_genes:
+                gene = gene.replace('(', '').replace(')', '')
+                genes.append(gene)
+        return genes
+    
+    def get_UniProt_sequence(gene):
+        """
+        Query UniProt for gene sequence.
+        
+        Parameters
+        ----------
+        gene : str
+            Gene name to query
+        
+        Returns
+        -------
+        str or None
+            Protein sequence if found, None otherwise
+        """
+        if not gene:
+            return None
+        
+        try:
+            query = f"gene_exact:({gene}) AND taxonomy_id:({taxon_ID})"
+            result = service.search(query, frmt="fasta")
+            
+            # Validate result
+            if not result:
+                logging.warning(f"No sequence found for gene {gene}")
+                return None
+            
+            # Extract sequence from FASTA format
+            sequence = result.split("\n", 1)[-1]
+            sequence = sequence.replace("\n", "").strip()
+            
+            # Additional validation
+            if not sequence:
+                logging.warning(f"Empty sequence retrieved for gene {gene}")
+                return None
+            
+            return sequence
+        
+        except urllib.error.URLError as url_err:
+            # Network-related errors
+            logging.warning(f"Network error retrieving sequence for {gene}: {url_err}")
+            return None
+        
+        except AttributeError as attr_err:
+            # Potential issues with service or method
+            logging.error(f"Attribute error for gene {gene}: {attr_err}", exc_info=True)
+            return None
+        
+        except Exception as e:
+            # Catch any other unexpected errors
+            logging.error(f"Unexpected error retrieving sequence for {gene}: {e}", exc_info=True)
+            return None
+    
+    # Create dataframe with all genes
+    gene_data = []
+    for gene in model.genes:
+        gene_data.append({
+            'Single_gene': gene.id,
+            'Name': gene.name
+        })
+    
+    df_genes = pd.DataFrame(gene_data)
+    
+    # Initialize UniProt service
+    service = UniProt()
+    
+    # Query sequences for each gene
+    df_genes['Sequence'] = df_genes['Single_gene'].apply(get_UniProt_sequence)
+    
+    # Save if output path provided
     if output_path:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        df.to_csv(output_path, index=False)
-    return df
-
-
-
+        ensure_dir_exists(os.path.dirname(output_path))
+        df_genes.to_csv(output_path, index=False)
+    
+    return df_genes
 
 def prepare_model_data(model_path, substrates_output=None, sequences_output=None, 
                       organism='E coli', metadata_dir=None):
@@ -717,25 +763,37 @@ def prepare_model_data(model_path, substrates_output=None, sequences_output=None
     irrev_model = model #convert_to_irreversible(model)
     # print(f"Converted to irreversible model with {len(irrev_model.reactions)} reactions")
     
-    # Extract substrates
+    # Extract substrates for both directions if reversible
     rxn_data = []
     for reaction in irrev_model.reactions:
+        # Forward direction (as written)
         substrates = get_substrate_metabolites(reaction)
         for substrate in substrates:
             rxn_data.append({
                 "Reaction": reaction.id,
-                "Substrate partner": substrate
+                "Substrate partner": substrate,
+                "Direction": "forward"
             })
-    
+
+        # If reversible, also add reverse direction (products as substrates)
+        if getattr(reaction, "reversibility", False):
+            products = [met.id for met in reaction.products]
+            for product in products:
+                rxn_data.append({
+                    "Reaction": reaction.id,
+                    "Substrate partner": product,
+                    "Direction": "reverse"
+                })
+
     substrate_df = pd.DataFrame(rxn_data)
-    print(f"Extracted {len(substrate_df)} substrate-reaction pairs")
+    print(f"Extracted {len(substrate_df)} substrate-reaction-direction pairs")
     
     # Map metabolites to SMILES
     substrate_df_with_smiles = map_metabolites(substrate_df, metadata_dir)
     print(f"Mapped metabolites to SMILES ({substrate_df_with_smiles['SMILES'].notna().sum()} found)")
     
     # Retrieve protein sequences
-    sequences_df = retrieve_sequences(irrev_model, organism, metadata_dir=metadata_dir)
+    sequences_df = retrieve_sequences(irrev_model, organism)
     print(f"Retrieved {sequences_df['Sequence'].notna().sum()} protein sequences")
     
     # Save outputs if paths provided

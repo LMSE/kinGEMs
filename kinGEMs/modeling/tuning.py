@@ -16,6 +16,16 @@ from Bio.SeqUtils.ProtParam import ProteinAnalysis
 import matplotlib.pyplot as plt
 import pandas as pd
 
+import warnings
+warnings.filterwarnings('ignore')
+import logging
+logging.getLogger('distributed').setLevel(logging.ERROR)
+try:
+    import gurobipy
+    gurobipy.setParam('OutputFlag', 0)
+except ImportError:
+    pass
+
 from ..config import ensure_dir_exists
 from ..dataset import annotate_model_with_kcat_and_gpr
 from .optimize import run_optimization_with_dataframe
@@ -99,16 +109,17 @@ def simulated_annealing(
         objective_reaction=biomass_reaction,
         enzyme_upper_bound=enzyme_fraction,
         output_dir=output_dir,
-        save_results=False
+        save_results=False,
+        verbose=False
     )
 
-    # pick top 10
+    # pick top 25
     enzyme_df = df_FBA[df_FBA['Variable']=='enzyme'].copy()
     enzyme_df['MW'] = enzyme_df['Index'].map(mw_dict).fillna(0)
     enzyme_df['enzyme_mass'] = enzyme_df['Value'] * enzyme_df['MW'] * 1e-3
-    top10 = enzyme_df.nlargest(10, 'enzyme_mass')
+    top25 = enzyme_df.nlargest(25, 'enzyme_mass')
     top_targets = (
-        top10[['Index','enzyme_mass']]
+        top25[['Index','enzyme_mass']]
         .rename(columns={'Index':'Single_gene'})
         .merge(processed_data, on='Single_gene')
         [['Reactions','Single_gene','enzyme_mass','kcat_mean','kcat_std']]
@@ -135,9 +146,9 @@ def simulated_annealing(
     while (temperature > min_temperature
            and iteration < max_iterations
            and current_biomass < objective_value):
-
-        print(f"\n--- Iteration {iteration} ---")
-        print(f"Current biomass = {current_biomass:.6e}")
+        if verbose:
+            print(f"\n--- Iteration {iteration} ---")
+            print(f"Current biomass = {current_biomass:.6e}")
 
         # PROPOSE & print old vs new kcats
         updated_df = df_new.copy()
@@ -150,7 +161,6 @@ def simulated_annealing(
             updated_df = update_kcat(updated_df, rxn, gene, new_k_hr)
 
         # ANNOTATE & EVALUATE
-        # temp_model = copy.deepcopy(model)
         temp_model = annotate_model_with_kcat_and_gpr(model=model, df=updated_df)
 
         new_biomass, temp_df_FBA, _, _ = run_optimization_with_dataframe(
@@ -159,13 +169,15 @@ def simulated_annealing(
             objective_reaction=biomass_reaction,
             enzyme_upper_bound=enzyme_fraction,
             output_dir=None,
-            save_results=False
+            save_results=False,
+            verbose=False
         )
-        print(f"Proposed biomass = {new_biomass:.6e}")
-        
-        # compute change *before* accepting new solutio
+        if verbose:
+            print(f"Proposed biomass = {new_biomass:.6e}")
+
+        # compute change *before* accepting new solution
         change = abs(new_biomass - current_biomass) / max(current_biomass, 1e-6)
-        
+
         # ACCEPT or REJECT
         prob = acceptance_probability(current_biomass, new_biomass, temperature)
         if prob > random.random():
@@ -197,7 +209,8 @@ def simulated_annealing(
         if change < change_threshold:
             no_change_counter += 1
             if no_change_counter >= max_unchanged_iterations:
-                print(f"No significant change for {max_unchanged_iterations} iterations; stopping early.")
+                if verbose:
+                    print(f"No significant change for {max_unchanged_iterations} iterations; stopping early.")
                 break
         else:
             no_change_counter = 0
