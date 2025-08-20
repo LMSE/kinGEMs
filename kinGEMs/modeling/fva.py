@@ -4,22 +4,26 @@ Flux Variability Analysis module for kinGEMs.
 This module provides functions for performing Flux Variability Analysis (FVA)
 with enzyme constraints, allowing exploration of the solution space.
 """
-
+import logging
 import os
+import warnings
 
+from dask import compute, delayed
+from dask.distributed import Client
 import pandas as pd
 
 from ..config import ensure_dir_exists
 
-import warnings
 warnings.filterwarnings('ignore')
-import logging
+
+
 logging.getLogger('distributed').setLevel(logging.ERROR)
 try:
     import gurobipy
     gurobipy.setParam('OutputFlag', 0)
 except ImportError:
     pass
+
 
 def flux_variability_analysis(model, processed_df, biomass_reaction,
                                output_file=None, enzyme_upper_bound=0.15, opt_ratio=0.9, enzyme_ratio=True,
@@ -75,7 +79,7 @@ def flux_variability_analysis(model, processed_df, biomass_reaction,
     # Step 2: Fix biomass value
     biomass_rxn = model.reactions.get_by_id(biomass_reaction)
     biomass_rxn.lower_bound = solution_biomass * opt_ratio
-    # biomass_rxn.upper_bound = solution_biomass
+    biomass_rxn.upper_bound = solution_biomass
 
     # Step 3: Run FVA
     min_fluxes = []
@@ -90,6 +94,7 @@ def flux_variability_analysis(model, processed_df, biomass_reaction,
         model_copy_min = model.copy()
 
         # Maximize this reaction
+        print(f"Maximizing flux for reaction: {rxn.id}")
         try:
             flux_max, _, _, _ = run_optimization_with_dataframe(
                 model=model_copy_max,
@@ -102,13 +107,15 @@ def flux_variability_analysis(model, processed_df, biomass_reaction,
                 promiscuous_off=promiscuous_off,
                 complexes_off=complexes_off,
                 maximization=True,
-                save_results=False
+                save_results=False,
+                verbose=True,
             )
         except Exception as e:
             print(f"⚠️ Max FVA failed for {rxn.id}: {e}")
             flux_max = None
 
         # Minimize this reaction
+        print(f"Minimizing flux for reaction: {rxn.id}")
         try:
             flux_min, _, _, _ = run_optimization_with_dataframe(
                 model=model_copy_min,
@@ -121,7 +128,8 @@ def flux_variability_analysis(model, processed_df, biomass_reaction,
                 promiscuous_off=promiscuous_off,
                 complexes_off=complexes_off,
                 maximization=False,
-                save_results=False
+                save_results=False,
+                verbose=True,
             )
         except Exception as e:
             print(f"⚠️ Min FVA failed for {rxn.id}: {e}")
@@ -442,12 +450,6 @@ def plot_cumulative_fvi_distribution(dfs, labels, output_file=None, roboto_font=
 
 ## PARALLEL FVA
 
-import os
-
-from dask import compute, delayed
-from dask.distributed import Client
-import pandas as pd
-
 
 # 1) A small helper that does the two optimizations for one reaction:
 def _fva_for_reaction(model, processed_df,
@@ -539,7 +541,7 @@ def flux_variability_analysis_parallel(model, processed_df, biomass_reaction,
         maximization=True, save_results=False,
     )
     # freeze biomass
-    biomass_rxn = model.reactions.get_by_id(biomass_reaction)
+    # biomass_rxn = model.reactions.get_by_id(biomass_reaction)
     biomass_bounds = (biomass_reaction, sol_biomass, sol_biomass)
 
     # 2) create one delayed task per reaction

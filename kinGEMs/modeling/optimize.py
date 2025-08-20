@@ -7,19 +7,11 @@ including core optimization functionality from the original KG03b module.
 
 from collections import Counter  # noqa: F401
 from itertools import product
+import logging
 import math
 import os
 import re
-
 import warnings
-warnings.filterwarnings('ignore')
-import logging
-logging.getLogger('distributed').setLevel(logging.ERROR)
-try:
-    import gurobipy
-    gurobipy.setParam('OutputFlag', 0)
-except ImportError:
-    pass
 
 from Bio.SeqUtils import molecular_weight
 import cobra as cb
@@ -35,6 +27,15 @@ from pyomo.opt import SolverFactory, SolverStatus, TerminationCondition
 
 from ..config import ensure_dir_exists  # noqa: F401
 
+warnings.filterwarnings('ignore')
+
+
+logging.getLogger('distributed').setLevel(logging.ERROR)
+try:
+    import gurobipy
+    gurobipy.setParam('OutputFlag', 0)
+except ImportError:
+    pass
 
 def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=None, 
                     enzyme_upper_bound=0.125, enzyme_ratio=True, maximization=True, 
@@ -81,8 +82,6 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
     tuple
         (solution_value, df_FBA, gene_sequences_dict)
     """
-
-    from pyomo.environ import Suffix
 
     # Model handling - load if string path provided
     if isinstance(model, str):
@@ -491,7 +490,7 @@ def run_optimization(model, kcat_dict, objective_reaction, gene_sequences_dict=N
             print("Solver status is infeasible")
         else:
             # Something else is wrong
-            print("Solver Status: ",  result.solver.status)
+            print("Solver Status: ",  results.solver.status)
             
             # … (often‐used code to extract objective, variables, df_FBA, etc.) …
         solution_value = pyo.value(Concretemodel.objective)
@@ -602,6 +601,7 @@ def run_optimization4(
     maximization=True,
     solver_name='gurobi',
     tee=False,
+    verbose=False,
 ):
     """
     Enzyme-constrained FBA via Pyomo, handling:
@@ -611,13 +611,10 @@ def run_optimization4(
       - promiscuous enzymes
     Returns: sol_val, df_FBA, gene_sequences_dict, model
     """
-    import time  # Add this import
     
-    total_start = time.time()
     
     # 1) Load COBRA model
     # print("Step 1: Loading COBRA model...")
-    step_start = time.time()
     if isinstance(model, str):
         mod = (
             cb.io.read_sbml_model(model)
@@ -626,20 +623,17 @@ def run_optimization4(
         )
     else:
         mod = model
-    # print(f"Model loaded in {time.time() - step_start:.2f}s\n")
 
     # 2) Initial flux guess
     # print("Step 2: Getting initial flux guess...")
-    step_start = time.time()
     mod.objective = objective_reaction
-    print("Model objective:", mod.objective)
+    if verbose:
+        print("Model objective:", mod.objective)
     cobra_sol = mod.optimize()
     flux0 = cobra_sol.fluxes.to_dict()
-    # print(f"Initial optimization completed in {time.time() - step_start:.2f}s\n")
 
     # 3) Load & normalize kcat_dict
     # print("Step 3: Processing kcat dictionary...")
-    step_start = time.time()
     if isinstance(kcat_dict, str):
         df = pd.read_csv(kcat_dict)
         tmp = {}
@@ -649,11 +643,9 @@ def run_optimization4(
     # convert all values to hr^-1 lists
     for key, vals in list(kcat_dict.items()):
         kcat_dict[key] = [(v * 3600 if v < 1000 else v) for v in vals]
-    # print(f"kcat dictionary processed ({len(kcat_dict)} entries) in {time.time() - step_start:.2f}s\n")
 
     # 4) Build stoichiometry, bounds, objective
     # print("Step 4: Building model data structures...")
-    step_start = time.time()
     S = create_stoichiometric_matrix(mod)
     mets = [m.id for m in mod.metabolites]
     rxns = [r.id for r in mod.reactions]
@@ -663,11 +655,9 @@ def run_optimization4(
     obj_coef = {r.id: (1.0 if r.id == objective_reaction else 0.0) for r in mod.reactions} #obj_coef = {r.id: r.objective_coefficient for r in mod.reactions}
     met_index = {m: i for i, m in enumerate(mets)}
     rxn_index = {r: j for j, r in enumerate(rxns)}
-    # print(f"Data structures built ({len(mets)} mets, {len(rxns)} rxns, {len(genes)} genes) in {time.time() - step_start:.2f}s\n")
 
     # 5) Generate DNF clauses
     # print("Step 5: Parsing gene-protein-reaction rules...")
-    step_start = time.time()
     dnf_clauses = {}
     for r in mod.reactions:
         rule = (r.gene_reaction_rule or '').strip()
@@ -675,20 +665,16 @@ def run_optimization4(
             continue
         tokens = _tokenize_gpr(rule)
         dnf_clauses[r.id] = _parse_gpr_to_dnf(tokens)
-    # print(f"GPR rules parsed ({len(dnf_clauses)} reactions with GPRs) in {time.time() - step_start:.2f}s\n")
 
     # 6) Build Pyomo model
     # print("Step 6: Building Pyomo optimization model...")
-    step_start = time.time()
     m = ConcreteModel()  # noqa: F405
     m.M = Set(initialize=mets)  # noqa: F405
     m.R = Set(initialize=rxns)  # noqa: F405
     m.G = Set(initialize=genes)  # noqa: F405
     m.K = Set(initialize=[(r, g) for r in rxns for g in genes], dimen=2)  # noqa: F405
-    # print(f"Sets created in {time.time() - step_start:.2f}s\n")
 
     # Variables
-    substep_start = time.time()
     m.v = Var(  # noqa: F405
         m.R,
         domain=Reals,  # noqa: F405
@@ -696,7 +682,6 @@ def run_optimization4(
         initialize=lambda mo, j: flux0.get(j, 0.0)
     )
     m.E = Var(m.G, domain=NonNegativeReals, initialize=0.01)  # noqa: F405
-    # print(f"Variables created in {time.time() - substep_start:.2f}s\n")
 
     # Mass balance
     # substep_start = time.time()
@@ -707,7 +692,6 @@ def run_optimization4(
     # print(f"Mass balance constraints created in {time.time() - substep_start:.2f}s\n")
     
     # OPTIMIZED mass balance
-    substep_start = time.time()
     
     # Pre-compute which reactions involve each metabolite
     met_reactions = {}
@@ -729,14 +713,12 @@ def run_optimization4(
         return sum(S[i, rxn_index[r]] * mo.v[r] for r in relevant_rxns) == 0
 
     m.mass_balance = Constraint(m.M, rule=mass_balance_sparse)  # noqa: F405
-    # print(f"Mass balance constraints created in {time.time() - substep_start:.2f}s\n")
     
     # Objective
     sense = maximize if maximization else minimize  # noqa: F405
     m.obj = Objective(expr=sum(obj_coef[r] * m.v[r] for r in m.R), sense=sense)  # noqa: F405
 
     # 6a) AND‐GPR: single or complex
-    substep_start = time.time()
     def and_rule(mo, rxn_id, gene_id):
         clauses = dnf_clauses.get(rxn_id, [])
         if not clauses:
@@ -765,10 +747,8 @@ def run_optimization4(
             return mo.v[rxn_id] <= k_val * mo.E[gene_id]
         return Constraint.Skip  # noqa: F405
     m.kcat_and = Constraint(m.K, rule=and_rule)  # noqa: F405
-    # print(f"AND-GPR constraints created in {time.time() - substep_start:.2f}s\n")
 
     # 6b) OR‐GPR: isoenzymes
-    substep_start = time.time()
     def iso_rule(mo, rxn_id):
         clauses = dnf_clauses.get(rxn_id, [])
         if len(clauses) <= 1:
@@ -789,10 +769,8 @@ def run_optimization4(
             return Constraint.Skip  # noqa: F405
         return mo.v[rxn_id] <= sum(terms)
     m.kcat_iso = Constraint(m.R, rule=iso_rule)  # noqa: F405
-    # print(f"OR-GPR constraints created in {time.time() - substep_start:.2f}s\n")
 
     # 6c) Promiscuous enzymes
-    substep_start = time.time()
     def promis_rule(mo, g_id):
         usage = []
         for r_id, clauses in dnf_clauses.items():
@@ -805,11 +783,9 @@ def run_optimization4(
             return Constraint.Skip  # noqa: F405
         return sum(usage) <= mo.E[g_id]
     m.promiscuous = Constraint(m.G, rule=promis_rule)  # noqa: F405
-    # print(f"Promiscuous enzyme constraints created in {time.time() - substep_start:.2f}s\n")
 
     # 7) Total enzyme pool / ratio
     # print("Step 7: Adding enzyme pool constraints...")
-    step_start = time.time()
     if enzyme_ratio:
         if gene_sequences_dict is None:
             gene_sequences_dict = {}
@@ -822,9 +798,7 @@ def run_optimization4(
     else:
         m.E_total = Var(domain=NonNegativeReals, bounds=(0, enzyme_upper_bound))  # noqa: F405
         m.total_enzyme = Constraint(expr=sum(m.E[g] for g in m.G) <= m.E_total)  # noqa: F405
-    # print(f"Enzyme pool constraints added in {time.time() - step_start:.2f}s\n")
 
-    # print(f"\nMODEL BUILDING COMPLETED in {time.time() - total_start:.2f}s")
 
     # 8) Solve
     # print("Step 8: Setting up and running solver...")
@@ -977,32 +951,6 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
             # Store gene sequence for molecular weight calculation
             if gene_id not in gene_sequences_dict and pd.notna(row['SEQ']):
                 gene_sequences_dict[gene_id] = row['SEQ']
-    
-    # # Call the original run_optimization function with the extracted kcat_dict
-    # solution_value, df_FBA, gene_sequences_dict, pm_model = run_optimization(
-    #     model=model, 
-    #     kcat_dict=kcat_dict, 
-    #     objective_reaction=objective_reaction,
-    #     gene_sequences_dict=gene_sequences_dict,
-    #     enzyme_upper_bound=enzyme_upper_bound, 
-    #     enzyme_ratio=enzyme_ratio, 
-    #     maximization=maximization,
-    #     multi_enzyme_off=multi_enzyme_off, 
-    #     isoenzymes_off=isoenzymes_off,
-    #     promiscuous_off=promiscuous_off, 
-    #     complexes_off=complexes_off,
-    #     print_reaction_conditions=print_reaction_conditions
-    # )
-
-    # Call the original run_optimization function with the extracted kcat_dict
-    # solution_value, fluxes, enzymes, df_FBA = run_optimization2(
-    #     model=model, 
-    #     kcat_dict=kcat_dict, 
-    #     objective_reaction=objective_reaction,
-    #     gene_sequences_dict=gene_sequences_dict,
-    #     enzyme_upper_bound=enzyme_upper_bound, 
-    #     enzyme_ratio=enzyme_ratio, 
-    # )
 
     solution_value, df_FBA, gene_sequences_dict, m = run_optimization4(
         model = model,
@@ -1010,6 +958,7 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
         objective_reaction=objective_reaction,
         gene_sequences_dict=gene_sequences_dict,
         enzyme_upper_bound=enzyme_upper_bound,
+        maximization=maximization,
         enzyme_ratio=True,
         tee=verbose
     )
@@ -1281,8 +1230,6 @@ def validate_enzyme_constraints(df_FBA,
          or sum(e_i) ≤ enzyme_upper_bound (if enzyme_ratio=False).
       3) Steady‐state (S · v = 0) up to a small numerical tolerance.
     """
-
-    import numpy as np
 
     # 1) Build solution dicts for v_j and e_i
     #    df_FBA rows look like: Variable='reaction', Index='R_EX_glc__D_e', Value=4.5
