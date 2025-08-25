@@ -352,7 +352,7 @@ def plot_flux_variability(fva_results, reactions=None, figsize=(12, 8), output_f
 def plot_cumulative_fvi_distribution(dfs, labels, output_file=None, roboto_font=None):
     """
     Plot cumulative distributions of Flux Variability Index (FVi) for multiple FVA result sets.
-    
+
     Parameters
     ----------
     dfs : list of pd.DataFrame
@@ -363,7 +363,7 @@ def plot_cumulative_fvi_distribution(dfs, labels, output_file=None, roboto_font=
         Path to save the plot.
     roboto_font : font manager or None
         Optional custom font (e.g., matplotlib.font_manager.FontProperties)
-    
+
     Returns
     -------
     None
@@ -378,30 +378,21 @@ def plot_cumulative_fvi_distribution(dfs, labels, output_file=None, roboto_font=
     fvi_at_0_5 = []
 
     for df, label in zip(dfs, labels):
-        # Separate forward and reverse reactions
-        reverse_rows = df[df['Reactions'].str.endswith('_reverse')].copy()
-        normal_rows = df[~df['Reactions'].str.endswith('_reverse')].copy()
-        reverse_rows['Reactions'] = reverse_rows['Reactions'].str.replace('_reverse', '', regex=False)
+        # For each reaction, treat min/max as forward/backward directions
+        fvi_list = []
+        for idx, row in df.iterrows():
+            min_flux = row['Min Solutions']
+            max_flux = row['Max Solutions']
+            # Forward direction: positive flux range
+            fwd_flux = max(max_flux, 0) - max(min_flux, 0)
+            # Backward direction: negative flux range
+            bwd_flux = abs(min(min_flux, 0) - min(max_flux, 0))
+            # FVi is sum of both directions
+            fvi = fwd_flux + bwd_flux
+            fvi_list.append(fvi)
 
-        combined_df = pd.merge(
-            normal_rows,
-            reverse_rows,
-            on='Reactions',
-            how='left',
-            suffixes=('', '_Reverse')
-        )
-
-        def calculate_fvi(row):
-            if pd.isna(row['Max Solutions']):
-                return np.nan
-            elif pd.isna(row['Max Solutions_Reverse']) or pd.isna(row['Min Solutions_Reverse']):
-                return abs(row['Max Solutions'] - row['Min Solutions'])
-            else:
-                return abs((row['Max Solutions'] - row['Min Solutions']) -
-                           (row['Max Solutions_Reverse'] - row['Min Solutions_Reverse']))
-
-        combined_df['FVi'] = combined_df.apply(calculate_fvi, axis=1)
-        fvi_values = combined_df['FVi'].dropna()
+        fvi_values = np.array(fvi_list)
+        fvi_values = fvi_values[~np.isnan(fvi_values)]
         fvi_values = fvi_values[fvi_values >= 1e-6]
 
         sorted_fvi = np.sort(fvi_values)
@@ -447,8 +438,6 @@ def plot_cumulative_fvi_distribution(dfs, labels, output_file=None, roboto_font=
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
 
     plt.show()
-
-## PARALLEL FVA
 
 
 # 1) A small helper that does the two optimizations for one reaction:
