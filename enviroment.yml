@@ -1,0 +1,23 @@
+name: kingems
+channels:
+- conda-forge
+- defaults
+dependencies:
+- loguru
+- mkdocs
+- pip
+- python-dotenv
+- ruff
+- tqdm
+- typer
+- bioservices
+- cobra
+- numpy
+- pandas
+- pubchempy
+- requests
+- biopython
+- pyomo
+- seaborn
+- ipykernel
+- glpk

@@ -26,7 +26,7 @@ A pipeline for automatic reconstruction of enzyme-constrained genome-scale model
 │                         the creator's initials, and a short `-` delimited description, e.g.
 │                         `1.0-jqp-initial-data-exploration`.
 │
-├── pyproject.toml     <- Project configuration file with package metadata for 
+├── pyproject.toml     <- Project configuration file with package metadata for
 │                         kinGEMs and configuration for tools like black
 │
 ├── references         <- Data dictionaries, manuals, and all other explanatory materials.
@@ -49,37 +49,49 @@ A pipeline for automatic reconstruction of enzyme-constrained genome-scale model
     │
     ├── features.py             <- Code to create features for modeling
     │
-    ├── modeling                
-    │   ├── __init__.py 
-    │   ├── predict.py          <- Code to run model inference with trained models          
+    ├── modeling
+    │   ├── __init__.py
+    │   ├── predict.py          <- Code to run model inference with trained models
     │   └── train.py            <- Code to train models
     │
     └── plots.py                <- Code to create visualizations
 ```
 
-
 ## Installation
 
 ### Prerequisites
+
 - Python 3.9
 - [Anaconda](https://www.anaconda.com/products/distribution) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html)
 - Git (for cloning the repository)
 
 ### Quick Start
 
+We recommend using [mamba](https://github.com/mamba-org/mamba) since the linear programming libraries
+require non-python dependencies (i.g. [glpk](https://www.gnu.org/software/glpk/) & glpsol.exe)
+
+```bash
+   git clone https://github.com/FILL_ME/kinGEMs.git
+   cd kinGEMs
+   mamba env create -f enviroment.yml
+```
+
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/your-username/kinGEMs.git
    cd kinGEMs
    ```
 
 2. **Create and activate a conda environment:**
+
    ```bash
    conda create -n kingems python=3.9 -y
    conda activate kingems
    ```
 
 3. **Install dependencies:**
+
    ```bash
    pip install -r requirements.txt
    ```
@@ -87,31 +99,34 @@ A pipeline for automatic reconstruction of enzyme-constrained genome-scale model
 4. **Install System-Level Dependencies:**
 
    **GLPK Solver**:
-      The GLPK (GNU Linear Programming Kit) solver is required for optimization operations. There are two options for installation:
+   The GLPK (GNU Linear Programming Kit) solver is required for optimization operations. There are two options for installation:
 
+   **_Option A: Using Conda (Recommended)_**
 
-   ***Option A: Using Conda (Recommended)***
-      1. Run:
-      ```bash
-      conda install -c conda-forge glpk
-      ```
-      2. (On Windows) Ensure the following directory is added to your system PATH environment variable:
-      
-      ```bash
-      C:\Users\<your-username>\anaconda3\envs\kingems\Library\bin
-    ```
-      This step is required so that Pyomo can locate the `glpsol.exe` executable.
+   1. Run:
 
+   ```bash
+   conda install -c conda-forge glpk
+   ```
 
-   ***Option B: Manual Installation (Windows)***
-      1. Get the precompiled binary for Windows from [GLPK for Windows](https://sourceforge.net/projects/winglpk/).
-      2. Extract the downloaded files to a directory on your system (e.g., `C:\glpk`).
-      3. Add the directory containing `glpsol.exe` to your system's PATH environment variable.
+   2. (On Windows) Ensure the following directory is added to your system PATH environment variable:
 
+   ```bash
+   C:\Users\<your-username>\anaconda3\envs\kingems\Library\bin
+   ```
 
-   ***Verify GLPK Installation***
+   This step is required so that Pyomo can locate the `glpsol.exe` executable.
+
+   **_Option B: Manual Installation (Windows)_**
+
+   1. Get the precompiled binary for Windows from [GLPK for Windows](https://sourceforge.net/projects/winglpk/).
+   2. Extract the downloaded files to a directory on your system (e.g., `C:\glpk`).
+   3. Add the directory containing `glpsol.exe` to your system's PATH environment variable.
+
+   **_Verify GLPK Installation_**
 
    After installing GLPK, verify that it is accessible by running:
+
    ```bash
    glpsol --version
    ```
