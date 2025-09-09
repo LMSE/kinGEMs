@@ -1,6 +1,6 @@
 # kinGEMs Publication Timeline (Updated – Aug 2025)
 
-Target journal: **PNAS**  
+Target journal: **Nature Biotechnology**  
 Target submission: **By Sep 30, 2025**
 
 ---
@@ -16,18 +16,18 @@ Target submission: **By Sep 30, 2025**
 ## 📅 Timeline & To-Do List
 
 ### Aug 19–24 (This Week)
-- [ ] Debug simulation issues (P. putida, S. elongatus runs).
+- [X] Debug simulation issues (using E. coli runs).
 - [ ] Coordinate with Lya on flux validation outputs.
-- [ ] Finalize plan for Biolog classification metrics.
+- [X] Finalize plan for Biolog classification metrics.
 
 ### Aug 25 – Sep 7 (Writing + Validation in Parallel)
 - Writing:
   - [ ] Draft **Introduction** + **Methods** sections.
-  - [ ] Start figure assembly (schematics, pipeline, Biolog classification workflow).
+  - [X] Start figure assembly (schematics, pipeline, Biolog classification workflow).
 - Validation:
   - [ ] Benchmark kinGEMs growth predictions vs Biolog (classification only).
-  - [ ] Benchmark kinGEMs vs black-box model (scDCA from Genentech).
-  - [ ] Integrate Lya’s flux validation results.
+  - [ ] ~~Benchmark kinGEMs vs black-box model (scDCA from Genentech)~~.
+  - .
   - [ ] Begin scaling tests on 10–20 species AGORA subset.
 
 ### Sep 8 – 14
@@ -35,6 +35,8 @@ Target submission: **By Sep 30, 2025**
   - [ ] Draft **Results (Part 1)**: P. putida & S. elongatus benchmarks, Biolog classification results.
   - [ ] Add figures: growth classification ROC/PR curves, confusion matrices.
 - Validation:
+  - [ ] Benchmark kinGEMs growth predictions vs Biolog classification
+  - [ ] Rerun E. coli genetic perturbation prediction on new pipeline
   - [ ] Collate FVA precision + knockout accuracy metrics.
   - [ ] Continue AGORA scaling.
 
@@ -43,8 +45,11 @@ Target submission: **By Sep 30, 2025**
   - [ ] Draft **Results (Part 2)**: Flux validation (Lya), scaling to multi-species, comparisons with black-box.
   - [ ] Draft **Discussion** section.
 - Validation:
+  - [ ] Run P. putida and S. elongatus on kinGEMs
+  - [ ] Run P. putida and S. elongatus genetic perturbation
   - [ ] Finalize all stats/plots for flux validation & scaling.
   - [ ] QA check all figures and tables.
+  - [ ] Integrate Lya’s flux validation results
 
 ### Sep 22 – 26
 - [ ] Internal review with co-authors.

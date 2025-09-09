@@ -4,11 +4,11 @@ Parameter tuning module for kinGEMs.
 This module provides simulated annealing functionality to tune kcat parameters
 and optimize the model's performance.
 """
-
 import copy  # noqa: F401
 import math  # noqa: F401
 import os
 import random  # noqa: F401
+import warnings
 
 from Bio.Data.IUPACData import protein_letters
 from Bio.SeqUtils import molecular_weight
@@ -16,7 +16,11 @@ from Bio.SeqUtils.ProtParam import ProteinAnalysis
 import matplotlib.pyplot as plt
 import pandas as pd
 
-import warnings
+from ..config import ensure_dir_exists
+from ..dataset import annotate_model_with_kcat_and_gpr
+from ..plots import plot_annealing_progress
+from .optimize import run_optimization_with_dataframe
+
 warnings.filterwarnings('ignore')
 import logging
 logging.getLogger('distributed').setLevel(logging.ERROR)
@@ -26,9 +30,7 @@ try:
 except ImportError:
     pass
 
-from ..config import ensure_dir_exists
-from ..dataset import annotate_model_with_kcat_and_gpr
-from .optimize import run_optimization_with_dataframe
+
 
 
 def simulated_annealing(
@@ -113,13 +115,13 @@ def simulated_annealing(
         verbose=False
     )
 
-    # pick top 25
+    # pick top 65
     enzyme_df = df_FBA[df_FBA['Variable']=='enzyme'].copy()
     enzyme_df['MW'] = enzyme_df['Index'].map(mw_dict).fillna(0)
     enzyme_df['enzyme_mass'] = enzyme_df['Value'] * enzyme_df['MW'] * 1e-3
-    top25 = enzyme_df.nlargest(25, 'enzyme_mass')
+    top65 = enzyme_df.nlargest(65, 'enzyme_mass')
     top_targets = (
-        top25[['Index','enzyme_mass']]
+        top65[['Index','enzyme_mass']]
         .rename(columns={'Index':'Single_gene'})
         .merge(processed_data, on='Single_gene')
         [['Reactions','Single_gene','enzyme_mass','kcat_mean','kcat_std']]
@@ -284,179 +286,3 @@ def save_annealing_results(output_dir, kcat_dict, df_enzyme_sorted, df_new, iter
     # Create and save plot
     plot_annealing_progress(iterations, biomasses, 
                            output_path=os.path.join(output_dir, f"{prefix}annealing_progress.png"))
-    
-def plot_annealing_progress(iterations, biomasses, output_path=None, show=False):
-    """
-    Plot the progress of simulated annealing optimization.
-    
-    Parameters
-    ----------
-    iterations : list
-        List of iteration numbers
-    biomasses : list
-        List of biomass values at each iteration
-    output_path : str, optional
-        Path to save the plot figure
-    show : bool, optional
-        Whether to display the plot
-        
-    Returns
-    -------
-    matplotlib.figure.Figure
-        The plot figure object
-    """
-    plt.figure(figsize=(10, 6))
-    plt.plot(iterations, biomasses, marker='o', linestyle='-', color='b', label='Biomass')
-    
-    # Add labels and title
-    plt.xlabel('Iterations', fontsize=16)
-    plt.ylabel('Biomass (1/hr)', fontsize=16)
-    plt.title('Biomass vs Iterations')
-    plt.legend()
-    plt.xticks(fontsize=14)
-    plt.yticks(fontsize=14)
-    
-    # Save if path provided
-    if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
-    # Show if requested
-    if show:
-        plt.show()
-    
-    return plt.gcf()
-
-def analyze_kcat_changes(original_kcat_file, optimized_kcat_df, output_dir=None, prefix=""):
-    """
-    Analyze and visualize changes in kcat values after optimization.
-    
-    Parameters
-    ----------
-    original_kcat_file : str
-        Path to original kcat values file
-    optimized_kcat_df : pandas.DataFrame
-        DataFrame with optimized kcat values
-    output_dir : str, optional
-        Directory to save output files
-    prefix : str, optional
-        Prefix for output filenames
-        
-    Returns
-    -------
-    pandas.DataFrame
-        DataFrame comparing original and optimized kcat values
-    """
-    # Load original kcat values
-    old_kcats = pd.read_csv(original_kcat_file)
-    new_kcats = optimized_kcat_df
-    
-    # Clean and prepare data
-    old_kcats = old_kcats.dropna(subset=['kcat (1/hr)'])
-    old_kcats["kcat (1/hr)"] = old_kcats["kcat (1/hr)"].astype(float)
-    old_kcats = old_kcats.sort_values(by="kcat (1/hr)", ascending=False)
-    old_kcats = old_kcats.drop_duplicates(subset=["Reactions", "Single_gene"], keep="first")
-    old_kcats = old_kcats.reset_index(drop=True)
-    old_kcats = old_kcats.sort_values(by='Reactions')
-    
-    # Clean new kcats
-    new_kcats = new_kcats.dropna(subset=['kcat (1/hr)'])
-    new_kcats["kcat (1/hr)"] = new_kcats["kcat (1/hr)"].astype(float)
-    new_kcats = new_kcats.sort_values(by="kcat (1/hr)", ascending=False)
-    new_kcats = new_kcats.drop_duplicates(subset=["Reactions", "Single_gene"], keep="first")
-    new_kcats = new_kcats.reset_index(drop=True)
-    new_kcats = new_kcats.sort_values(by='Reactions')
-    
-    # Merge the two dataframes on 'Reactions'
-    merged_kcats = pd.merge(old_kcats, new_kcats, 
-                            on=['Reactions', 'SMILES', 'Single_gene'], 
-                            suffixes=('_old', '_new'))
-    
-    # Save if output_dir provided
-    if output_dir:
-        merged_kcats.to_csv(os.path.join(output_dir, f"{prefix}merged_kcats.csv"), index=False)
-        
-        # Create visualization plots
-        plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats,
-                                         output_dir=output_dir, prefix=prefix)
-    
-    return merged_kcats
-
-def plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats, output_dir=None, prefix=""):
-    """
-    Create visualizations comparing original and optimized kcat distributions.
-    
-    Parameters
-    ----------
-    old_kcats : pandas.DataFrame
-        DataFrame with original kcat values
-    new_kcats : pandas.DataFrame
-        DataFrame with optimized kcat values
-    merged_kcats : pandas.DataFrame
-        DataFrame comparing original and optimized kcat values
-    output_dir : str, optional
-        Directory to save output figures
-    prefix : str, optional
-        Prefix for output filenames
-    """
-    import seaborn as sns
-    
-    # Ensure directory exists if provided
-    if output_dir:
-        ensure_dir_exists(output_dir)
-    
-    # Set up visualization style
-    sns.set_style("whitegrid")
-    
-    # Create histogram comparison
-    plt.figure(figsize=(10, 6))
-    sns.histplot(old_kcats['kcat (1/hr)'], color='orange', label='Original kcats', kde=False, bins=10)
-    sns.histplot(new_kcats['kcat (1/hr)'], color='blue', label='Optimized kcats', kde=False, bins=10, alpha=0.6)
-    plt.xlabel('kcat (1/hr), log scale', fontsize=16)
-    plt.ylabel('Count', fontsize=16)
-    plt.title('Distribution of kcat Values', fontsize=16)
-    plt.legend()
-    plt.xscale('log')
-    plt.xticks(fontsize=14)
-    plt.yticks(fontsize=14)
-    
-    if output_dir:
-        plt.savefig(os.path.join(output_dir, f"{prefix}kcat_histogram.png"), dpi=300, bbox_inches='tight')
-    
-    # Create boxplot comparison
-    plt.figure(figsize=(10, 6))
-    combined_data = pd.DataFrame({
-        'kcat (1/hr)': pd.concat([old_kcats['kcat (1/hr)'], new_kcats['kcat (1/hr)']]),
-        'Type': ['Original kcats'] * len(old_kcats) + ['Optimized kcats'] * len(new_kcats),
-    })
-    
-    sns.boxplot(x='kcat (1/hr)', y='Type', data=combined_data)
-    plt.xscale('log')
-    plt.title('Comparison of kcat Distributions', fontsize=16)
-    plt.xlabel('kcat (1/hr), log scale', fontsize=16)
-    plt.ylabel('', fontsize=16)
-    plt.xticks(fontsize=14)
-    plt.yticks(fontsize=14)
-    
-    if output_dir:
-        plt.savefig(os.path.join(output_dir, f"{prefix}kcat_boxplot.png"), dpi=300, bbox_inches='tight')
-    
-    # Create scatter plot comparing old vs new kcats
-    plt.figure(figsize=(10, 8))
-    sns.scatterplot(x='kcat (1/hr)_old', y='kcat (1/hr)_new', data=merged_kcats)
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.title('Original vs. Optimized kcat Values', fontsize=16)
-    plt.xlabel('Original kcat (1/hr)', fontsize=16)
-    plt.ylabel('Optimized kcat (1/hr)', fontsize=16)
-    plt.xticks(fontsize=14)
-    plt.yticks(fontsize=14)
-    
-    # Add a diagonal line for reference
-    lims = [
-        min(plt.xlim()[0], plt.ylim()[0]),
-        max(plt.xlim()[1], plt.ylim()[1]),
-    ]
-    plt.plot(lims, lims, 'k--', alpha=0.5, zorder=0)
-    
-    if output_dir:
-        plt.savefig(os.path.join(output_dir, f"{prefix}kcat_scatter.png"), dpi=300, bbox_inches='tight')
