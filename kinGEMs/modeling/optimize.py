@@ -789,8 +789,17 @@ def run_optimization4(
     if enzyme_ratio:
         if gene_sequences_dict is None:
             gene_sequences_dict = {}
-        mw = {g: (molecular_weight(gene_sequences_dict.get(g, ''), seq_type='protein') or 1e5)
-              for g in genes}
+        mw = {}
+        for g in genes:
+            seq = gene_sequences_dict.get(g, '')
+            try:
+                mw_val = molecular_weight(seq, seq_type='protein')
+                if not mw_val:
+                    mw_val = 1e5
+            except Exception as e:
+                print(f"[MW ERROR] Gene: {g} | Sequence: '{seq}' | Error: {e}")
+                mw_val = 1e5
+            mw[g] = mw_val
         m.E_ratio = Var(domain=NonNegativeReals, bounds=(0, enzyme_upper_bound))  # noqa: F405
         m.total_enzyme = Constraint(  # noqa: F405
             expr=sum(m.E[g] * mw[g] for g in m.G) * 1e-3 <= m.E_ratio
