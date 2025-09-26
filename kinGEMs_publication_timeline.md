@@ -60,6 +60,18 @@ Target submission: **By Sep 30, 2025**
 - [ ] Final checks: references, cover letter, journal formatting.
 - [ ] Package and **submit to PNAS** by Sep 30, 2025.
 
+
+### Sep 26 meeting
+- **New approach**: utilize FBA data as input
+- If gene essentiality doesn't improve, discard
+- Sim annealing + media changes -Lya
+- Revising gene essentiality (validation nb) -Lya
+- Use Noor's Biolog for growth (binary) -Rana
+
+--> New deadline: All validation resutls should be compeltefd by **Oct 13th**
+
+
+
 ---
 
 ## 🔑 Parallel Work Principles
