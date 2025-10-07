@@ -1,19 +1,47 @@
+# Core dependencies
 loguru
-mkdocs
-pip
 python-dotenv
-ruff
 tqdm
-typer
-bioservices
-cobra
+
+# Scientific computing
 numpy
 pandas
-pubchempy
-requests
-biopython
-pyomo
+scipy
+matplotlib
 seaborn
+
+# Bioinformatics
+bioservices
+cobra
+biopython
+pubchempy
+
+# Optimization
+pyomo
+
+# Machine learning (for validation_utils.py)
+scikit-learn
+lightgbm
+shap
+statsmodels
+
+# Clustering (for validation_utils.py)
+fastcluster
+
+# Parallel computing (for FVA)
+dask
+distributed
+
+# Web requests
+requests
+
+# Jupyter support
 ipykernel
-glpk
+
+# Development tools (optional)
+mkdocs
+ruff
+typer
+
+# Install package in editable mode
 -e .

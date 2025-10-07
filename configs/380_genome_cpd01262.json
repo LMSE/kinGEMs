@@ -1,0 +1,18 @@
+{
+  "model_name": "380_genome_cpd01262",
+  "organism": "E coli",
+  "biomass_reaction": null,
+  "enzyme_upper_bound": 0.15,
+  "enable_fva": false,
+  "enable_biolog_validation": false,
+  "metadata_dir": "data/Biolog experiments",
+  "simulated_annealing": {
+    "temperature": 1.0,
+    "cooling_rate": 0.95,
+    "min_temperature": 0.01,
+    "max_iterations": 100,
+    "max_unchanged_iterations": 5,
+    "change_threshold": 0.009,
+    "biomass_goal": 0.5
+  }
+}

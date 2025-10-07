@@ -1,0 +1,31 @@
+{
+  "model_name": "382_genome_cpd03198",
+  "organism": "E coli",
+  "biomass_reaction": null,
+  "enzyme_upper_bound": 0.15,
+  "enable_fva": false,
+  "enable_biolog_validation": true,
+  "metadata_dir": "data/Biolog experiments",
+  "simulated_annealing": {
+    "temperature": 1.0,
+    "cooling_rate": 0.95,
+    "min_temperature": 0.01,
+    "max_iterations": 100,
+    "max_unchanged_iterations": 4,
+    "change_threshold": 0.009,
+    "biomass_goal": 1.0
+  },
+  "biolog_validation": {
+    "experiments_file": "data/Biolog experiments/FBA_results.xlsx",
+    "sheet_name": "Ecoli",
+    "reference_compound": "cpd00027",
+    "uptake_rate": 100.0,
+    "blocked_compounds": [
+      "cpd00224", "cpd00122", "cpd00609", "cpd00108", "cpd00794", "cpd00138",
+      "cpd00588", "cpd00751", "cpd00164", "cpd00222", "cpd00154", "cpd00314",
+      "cpd00105", "cpd00396", "cpd00082", "cpd00027", "cpd00179", "cpd03198",
+      "cpd00184", "cpd00208", "cpd00249", "cpd01262", "cpd00182", "cpd00246",
+      "cpd00054", "cpd00020", "cpd00280", "cpd00832", "cpd00232", "cpd00276"
+    ]
+  }
+}
