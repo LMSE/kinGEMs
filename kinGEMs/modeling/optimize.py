@@ -39,8 +39,11 @@ except ImportError:
 
 def _tokenize_gpr(rule):
     """Split a GPR rule into tokens: parentheses, 'and', 'or', gene IDs."""
-    token_spec = r'\(|\)|and|or|[^()\s]+'
-    return re.findall(token_spec, rule.lower())
+    # Use case-insensitive matching for 'and'/'or', but preserve gene ID case
+    token_spec = r'\(|\)|(?i:and)|(?i:or)|[^()\s]+'
+    tokens = re.findall(token_spec, rule)
+    # Normalize 'and'/'or' to lowercase for parser, keep gene IDs as-is
+    return [t.lower() if t.lower() in ('and', 'or') else t for t in tokens]
 
 
 def _parse_gpr_to_dnf(tokens):
@@ -157,6 +160,7 @@ def run_optimization(
             continue
         tokens = _tokenize_gpr(rule)
         dnf_clauses[r.id] = _parse_gpr_to_dnf(tokens)
+    print(f"[DEBUG] dnf_clauses size: {len(dnf_clauses)} reactions with GPR rules")
 
     # 6) Build Pyomo model
     # print("Step 6: Building Pyomo optimization model...")
@@ -164,7 +168,10 @@ def run_optimization(
     m.M = Set(initialize=mets)  # noqa: F405
     m.R = Set(initialize=rxns)  # noqa: F405
     m.G = Set(initialize=genes)  # noqa: F405
-    m.K = Set(initialize=[(r, g) for r in rxns for g in genes], dimen=2)  # noqa: F405
+    # OPTIMIZED: Only include (rxn, gene) pairs that have kcat data
+    # This avoids creating millions of unnecessary constraint checks
+    m.K = Set(initialize=list(kcat_dict.keys()), dimen=2)  # noqa: F405
+    print(f"[DEBUG] m.K size: {len(m.K)} (reaction, gene) pairs with kcat data")
 
     # Variables
     m.v = Var(  # noqa: F405
@@ -211,39 +218,64 @@ def run_optimization(
     m.obj = Objective(expr=sum(obj_coef[r] * m.v[r] for r in m.R), sense=sense)  # noqa: F405
 
     # 6a) AND‐GPR: single or complex
+    constraints_added = 0
+    constraints_skipped = 0
+    skip_reasons = {'no_clauses': 0, 'gene_mismatch': 0, 'no_kcat': 0, 'other': 0}
+    
     def and_rule(mo, rxn_id, gene_id):
+        nonlocal constraints_added, constraints_skipped
         clauses = dnf_clauses.get(rxn_id, [])
         if not clauses:
+            constraints_skipped += 1
+            skip_reasons['no_clauses'] += 1
             return Constraint.Skip  # noqa: F405
         # single enzyme: max kcat
         if len(clauses) == 1 and len(clauses[0]) == 1:
             g = clauses[0][0]
             if gene_id != g:
+                constraints_skipped += 1
+                skip_reasons['gene_mismatch'] += 1
                 return Constraint.Skip  # noqa: F405
             k_list = kcat_dict.get((rxn_id, g), [])
             if not k_list:
+                constraints_skipped += 1
+                skip_reasons['no_kcat'] += 1
                 return Constraint.Skip  # noqa: F405
             k_val = max(k_list)
+            constraints_added += 1
             return mo.v[rxn_id] <= k_val * mo.E[g]
         # enzyme complex: avg kcat
         if len(clauses) == 1 and len(clauses[0]) > 1:
             clause = clauses[0]
             if gene_id not in clause:
+                constraints_skipped += 1
+                skip_reasons['gene_mismatch'] += 1
                 return Constraint.Skip  # noqa: F405
             all_ks = []
             for g in clause:
                 all_ks.extend(kcat_dict.get((rxn_id, g), []))
             if not all_ks:
+                constraints_skipped += 1
+                skip_reasons['no_kcat'] += 1
                 return Constraint.Skip  # noqa: F405
             k_val = sum(all_ks) / len(all_ks)
+            constraints_added += 1
             return mo.v[rxn_id] <= k_val * mo.E[gene_id]
+        constraints_skipped += 1
+        skip_reasons['other'] += 1
         return Constraint.Skip  # noqa: F405
     m.kcat_and = Constraint(m.K, rule=and_rule)  # noqa: F405
+    print(f"[DEBUG] AND constraints: {constraints_added} added, {constraints_skipped} skipped")
+    print(f"[DEBUG] Skip reasons: {skip_reasons}")
 
     # 6b) OR‐GPR: isoenzymes
+    iso_added = 0
+    iso_skipped = 0
     def iso_rule(mo, rxn_id):
+        nonlocal iso_added, iso_skipped
         clauses = dnf_clauses.get(rxn_id, [])
         if len(clauses) <= 1:
+            iso_skipped += 1
             return Constraint.Skip  # noqa: F405
         terms = []
         for clause in clauses:
@@ -258,9 +290,12 @@ def run_optimization(
             for g in clause:
                 terms.append(kmin * mo.E[g])
         if not terms:
+            iso_skipped += 1
             return Constraint.Skip  # noqa: F405
+        iso_added += 1
         return mo.v[rxn_id] <= sum(terms)
     m.kcat_iso = Constraint(m.R, rule=iso_rule)  # noqa: F405
+    print(f"[DEBUG] OR/ISO constraints: {iso_added} added, {iso_skipped} skipped")
 
     # 6c) Promiscuous enzymes
     def promis_rule(mo, g_id):
@@ -458,21 +493,24 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
     # Determine which kcat column to use (prefer 'kcat' if available, fallback to 'kcat_mean')
     kcat_col = 'kcat' if 'kcat' in processed_df.columns else 'kcat_mean'
     print(f"[DEBUG] Using kcat column: {kcat_col}")
+    print(f"[DEBUG] Processing {len(processed_df):,} rows...")
     
-    # Create a dictionary mapping from (reaction_id, gene_id) to kcat value
-    for _, row in processed_df.iterrows():
-        if pd.notna(row[kcat_col]) and pd.notna(row['SEQ']):
-            reaction_id = row['Reactions']
-            gene_id = row['Single_gene']
-            
-            # Store the kcat value as a list (to match the original function's format)
-            kcat_dict[(reaction_id, gene_id)] = [row[kcat_col]]
-            
-            # Store gene sequence for molecular weight calculation
-            if gene_id not in gene_sequences_dict and pd.notna(row['SEQ']):
-                gene_sequences_dict[gene_id] = row['SEQ']
+    # OPTIMIZED: Filter valid rows first, then use vectorized operations
+    # This is MUCH faster than iterrows() for large DataFrames (398K rows)
+    valid_rows = processed_df[processed_df[kcat_col].notna() & processed_df['SEQ'].notna()].copy()
+    print(f"[DEBUG] Valid rows after filtering: {len(valid_rows):,}")
+    
+    # Build kcat_dict using vectorized operations
+    # Group by (Reactions, Single_gene) and take the mean kcat if duplicates exist
+    grouped = valid_rows.groupby(['Reactions', 'Single_gene'])[kcat_col].mean()
+    kcat_dict = {key: [value] for key, value in grouped.items()}
+    
+    # Build gene_sequences_dict (take first sequence for each gene)
+    gene_seq_grouped = valid_rows.groupby('Single_gene')['SEQ'].first()
+    gene_sequences_dict = gene_seq_grouped.to_dict()
     
     print(f"[DEBUG] kcat_dict size: {len(kcat_dict)} entries")
+    print(f"[DEBUG] gene_sequences_dict size: {len(gene_sequences_dict)} genes")
     if len(kcat_dict) > 0:
         first_key = list(kcat_dict.keys())[0]
         print(f"[DEBUG] First kcat entry: {first_key} -> {kcat_dict[first_key]}")
