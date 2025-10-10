@@ -6,56 +6,102 @@
 
 A pipeline for automatic reconstruction of enzyme-constrained genome-scale models using CPI-Pred for kinetic parameter annotation.
 
+## Quick Start
+
+```bash
+# Run the pipeline with a configuration file
+python scripts/run_pipeline.py configs/iML1515_GEM.json
+
+# Force regenerate all intermediate files
+python scripts/run_pipeline.py configs/iML1515_GEM.json --force
+```
+
+For detailed usage instructions, see [docs/CONFIG_GUIDE.md](docs/CONFIG_GUIDE.md).
+
+## Documentation
+
+📚 **[Comprehensive documentation is available in the `docs/` directory](docs/README.md)**
+
+Key guides:
+- **[Configuration Guide](docs/CONFIG_GUIDE.md)** - How to use the pipeline
+- **[Pipeline Summary](docs/PIPELINE_SUMMARY.md)** - Workflow overview
+- **[Constraint Explanations](docs/MIXED_CONSTRAINTS_EXPLAINED.md)** - Understanding enzyme constraints
+- **[Virtual Environment Setup](docs/VENV_SETUP.md)** - Environment configuration
+
 ## Project Organization
 
 ```
-├── LICENSE            <- Open-source license if one is chosen
-├── Makefile           <- Makefile with convenience commands like `make data` or `make train`
-├── README.md          <- The top-level README for developers using this project.
-├── data
-│   ├── external       <- Data from third party sources.
-│   ├── interim        <- Intermediate data that has been transformed.
-│   ├── processed      <- The final, canonical data sets for modeling.
-│   └── raw            <- The original, immutable data dump.
+├── LICENSE                      <- Open-source license
+├── Makefile                     <- Convenience commands
+├── README.md                    <- Top-level README (this file)
+├── environment.yml              <- Conda environment specification
+├── requirements.txt             <- Python package requirements
+├── pyproject.toml              <- Project configuration
 │
-├── docs               <- A default mkdocs project; see www.mkdocs.org for details
+├── configs/                     <- JSON configuration files for different models
+│   ├── iML1515_GEM.json        <- E. coli iML1515 configuration
+│   ├── e_coli_core.json        <- E. coli core model
+│   ├── 382_genome_cpd03198.json <- ModelSEED configurations
+│   └── ...                     <- Other organism configurations
 │
-├── models             <- Trained and serialized models, model predictions, or model summaries
+├── data/
+│   ├── raw/                    <- Original model files (.xml)
+│   ├── interim/                <- Intermediate data (substrates, sequences, CPI-Pred predictions)
+│   └── processed/              <- Final processed data ready for modeling
 │
-├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-│                         the creator's initials, and a short `-` delimited description, e.g.
-│                         `1.0-jqp-initial-data-exploration`.
+├── docs/                        <- 📚 Comprehensive documentation
+│   ├── README.md               <- Documentation index
+│   ├── CONFIG_GUIDE.md         <- Configuration guide
+│   ├── PIPELINE_SUMMARY.md     <- Pipeline workflow
+│   ├── MIXED_CONSTRAINTS_EXPLAINED.md <- Enzyme constraint types
+│   ├── CONSTRAINT_SKIPPING_EXPLAINED.md <- Troubleshooting
+│   └── ...                     <- Additional technical docs
 │
-├── pyproject.toml     <- Project configuration file with package metadata for
-│                         kinGEMs and configuration for tools like black
+├── kinGEMs/                     <- Source code for kinGEMs package
+│   ├── __init__.py
+│   ├── config.py               <- Configuration variables
+│   ├── dataset.py              <- Standard model data processing
+│   ├── dataset_modelseed.py    <- ModelSEED-specific processing
+│   ├── plots.py                <- Visualization functions
+│   ├── validation_utils.py     <- Validation utilities
+│   └── modeling/               <- Optimization and tuning modules
+│       ├── __init__.py
+│       ├── fva.py              <- Flux variability analysis
+│       ├── optimize.py         <- Enzyme-constrained optimization
+│       └── tuning.py           <- Simulated annealing for kcat tuning
 │
-├── references         <- Data dictionaries, manuals, and all other explanatory materials.
+├── models/                      <- Final enzyme-constrained GEMs (.xml)
 │
-├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
-│   └── figures        <- Generated graphics and figures to be used in reporting
+├── notebooks/                   <- Jupyter notebooks for analysis
+│   ├── Analysis_Notebook.ipynb
+│   ├── run_iML1515_GEM.ipynb   <- Example runs for different models
+│   └── ...
 │
-├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
-│                         generated with `pip freeze > requirements.txt`
+├── results/                     <- Pipeline outputs
+│   ├── tuning_results/         <- Simulated annealing results by run_id
+│   │   └── {model}_{date}_{id}/
+│   │       ├── df_new.csv              <- Enzyme mass contributions
+│   │       ├── kcat_dict.csv           <- Tuned kcat values
+│   │       ├── final_model_info.csv    <- Complete results
+│   │       ├── annealing_progress.png  <- Optimization progress
+│   │       └── *_fva_*.csv/png         <- FVA results (if enabled)
+│   └── validation/             <- Validation results
 │
-├── setup.cfg          <- Configuration file for flake8
-│
-└── kinGEMs   <- Source code for use in this project.
-    │
-    ├── __init__.py             <- Makes kinGEMs a Python module
-    │
-    ├── config.py               <- Store useful variables and configuration
-    │
-    ├── dataset.py              <- Scripts to download or generate data
-    │
-    ├── features.py             <- Code to create features for modeling
-    │
-    ├── modeling
-    │   ├── __init__.py
-    │   ├── predict.py          <- Code to run model inference with trained models
-    │   └── train.py            <- Code to train models
-    │
-    └── plots.py                <- Code to create visualizations
+└── scripts/                     <- Executable scripts
+    ├── run_pipeline.py         <- 🚀 Main pipeline script (use this!)
+    ├── run_pipeline_with_logging.sh <- Wrapper for automatic logging
+    └── ...                     <- Model-specific legacy scripts
 ```
+
+## Key Features
+
+- **Unified Pipeline**: Single script handles any genome-scale metabolic model
+- **Automatic Model Type Detection**: Detects ModelSEED vs standard models automatically
+- **Enzyme Constraint Types**: Handles AND (complexes), OR (isoenzymes), and promiscuous constraints
+- **Simulated Annealing**: Optimizes kcat values to improve model predictions
+- **File Caching**: Speeds up subsequent runs by reusing intermediate files
+- **Flexible Configuration**: JSON-based configs for easy model switching
+- **Optional Analyses**: FVA and Biolog validation on demand
 
 ## Installation
 

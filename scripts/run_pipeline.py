@@ -69,26 +69,6 @@ except ImportError:
     pass
 
 
-class Tee:
-    """
-    Class to duplicate stdout/stderr to both console and a log file.
-    """
-    def __init__(self, file_path, mode='w'):
-        self.file = open(file_path, mode)
-        self.stdout = sys.stdout if mode == 'w' else sys.stderr
-        
-    def write(self, data):
-        self.file.write(data)
-        self.stdout.write(data)
-        
-    def flush(self):
-        self.file.flush()
-        self.stdout.flush()
-        
-    def close(self):
-        self.file.close()
-
-
 def load_config(config_path):
     """Load configuration from JSON file."""
     with open(config_path, 'r') as f:
@@ -172,10 +152,10 @@ def find_predictions_file(model_name, CPIPred_data_dir):
     available_files = glob.glob(os.path.join(CPIPred_data_dir, "*.csv"))
     if available_files:
         print(f"\n  ⚠️  No predictions file found for '{model_name}'")
-        print(f"  Available prediction files:")
+        print("  Available prediction files:")
         for f in available_files:
             print(f"    - {os.path.basename(f)}")
-        print(f"\n  Please ensure CPI-Pred predictions exist for this model.")
+        print("\n  Please ensure CPI-Pred predictions exist for this model.")
 
     raise FileNotFoundError(
         f"No CPI-Pred predictions file found for model '{model_name}' in {CPIPred_data_dir}"
@@ -413,39 +393,59 @@ def main():
     results_dir = os.path.join(project_root, "results")
     tuning_results_dir = os.path.join(results_dir, "tuning_results", run_id)
     os.makedirs(tuning_results_dir, exist_ok=True)
-    
-    # Set up output logging to capture all console output
-    log_file_path = os.path.join(results_dir, f"{run_id}.out")
-    tee_stdout = Tee(log_file_path, mode='w')
-    original_stdout = sys.stdout
-    original_stderr = sys.stderr
-    sys.stdout = tee_stdout
-    sys.stderr = tee_stdout
-    
-    try:
-        # File paths
-        model_path = os.path.join(raw_data_dir, f"{model_name}.xml")
 
-        # Find predictions file with flexible naming
-        predictions_csv_path = find_predictions_file(model_name, CPIPred_data_dir)
+    # File paths
+    model_path = os.path.join(raw_data_dir, f"{model_name}.xml")
 
-        substrates_output = os.path.join(interim_data_dir, f"{model_name}_substrates.csv")
-        sequences_output = os.path.join(interim_data_dir, f"{model_name}_sequences.csv")
-        merged_data_output = os.path.join(interim_data_dir, f"{model_name}_merged_data.csv")
-        processed_data_output = os.path.join(processed_data_dir, f"{model_name}_processed_data.csv")
+    # Find predictions file with flexible naming
+    predictions_csv_path = find_predictions_file(model_name, CPIPred_data_dir)
 
-        print("\n" + "="*70)
-        print(f"=== kinGEMs Pipeline for {model_name} ===")
-        print("="*70)
-        print(f"Run ID: {run_id}")
-        print(f"Model type: {model_type}")
-        print(f"Organism: {organism}")
-        print(f"Results directory: {tuning_results_dir}")
-        print(f"Log file: {log_file_path}")
-        print(f"Solver: {solver_name}")
-        if FORCE_REGENERATE:
-            print("⚠️  Force regenerate mode: will regenerate all intermediate files")
-        print("="*70)
+    substrates_output = os.path.join(interim_data_dir, f"{model_name}_substrates.csv")
+    sequences_output = os.path.join(interim_data_dir, f"{model_name}_sequences.csv")
+    merged_data_output = os.path.join(interim_data_dir, f"{model_name}_merged_data.csv")
+    processed_data_output = os.path.join(processed_data_dir, f"{model_name}_processed_data.csv")
+
+    print("\n" + "="*70)
+    print(f"=== kinGEMs Pipeline for {model_name} ===")
+    print("="*70)
+    print(f"Run ID: {run_id}")
+    print(f"Model type: {model_type}")
+    print(f"Organism: {organism}")
+    print(f"Results directory: {tuning_results_dir}")
+    print(f"Solver: {solver_name}")
+    if FORCE_REGENERATE:
+        print("⚠️  Force regenerate mode: will regenerate all intermediate files")
+    print("="*70)
+
+    # Print configuration summary
+    print("\n=== Configuration Summary ===")
+    print(f"Config file: {config_path}")
+    print(f"Model name: {model_name}")
+    print(f"Enzyme upper bound: {enzyme_upper_bound}")
+    print(f"Enable FVA: {enable_fva}")
+    print(f"Enable Biolog validation: {enable_biolog}")
+
+    # Print simulated annealing config
+    sa_config = config.get('simulated_annealing', {})
+    print("\nSimulated Annealing Settings:")
+    print(f"  Temperature: {sa_config.get('temperature', 1.0)}")
+    print(f"  Cooling rate: {sa_config.get('cooling_rate', 0.95)}")
+    print(f"  Min temperature: {sa_config.get('min_temperature', 0.01)}")
+    print(f"  Max iterations: {sa_config.get('max_iterations', 100)}")
+    print(f"  Max unchanged iterations: {sa_config.get('max_unchanged_iterations', 5)}")
+    print(f"  Change threshold: {sa_config.get('change_threshold', 0.009)}")
+    print(f"  Biomass goal: {sa_config.get('biomass_goal', 0.5)}")
+
+    # Print Biolog config if enabled
+    if enable_biolog:
+        biolog_cfg = config.get('biolog_validation', {})
+        print("\nBiolog Validation Settings:")
+        print(f"  Experiments file: {biolog_cfg.get('experiments_file', 'N/A')}")
+        print(f"  Sheet name: {biolog_cfg.get('sheet_name', 'Ecoli')}")
+        print(f"  Reference compound: {biolog_cfg.get('reference_compound', 'cpd00027')}")
+        print(f"  Uptake rate: {biolog_cfg.get('uptake_rate', 100.0)}")
+
+    print("="*70)
 
     # Determine biomass reaction
     temp_model = cobra.io.read_sbml_model(model_path)
@@ -543,7 +543,16 @@ def main():
     print(f"  Reactions with kcat: {rxn_with_kcat}/{len(model.reactions)}")
 
     # === Step 4: Optimization ===
-    print("\n=== Step 4: Running enzyme-constrained optimization ===")
+    print("\n=== Step 4: Running optimization ===")
+
+    # First run standard COBRApy optimization for comparison
+    print("  Running standard COBRApy FBA (no enzyme constraints)...")
+    cobra_solution = model.optimize()
+    cobra_biomass = cobra_solution.objective_value
+    print(f"    COBRApy biomass: {cobra_biomass:.4f}")
+
+    # Now run enzyme-constrained optimization
+    print("  Running kinGEMs enzyme-constrained optimization...")
     (solution_value, df_FBA, gene_sequences_dict, _) = run_optimization_with_dataframe(
         model=model,
         processed_df=processed_data,
@@ -561,7 +570,14 @@ def main():
         verbose=False,
         solver_name=solver_name
     )
-    print(f"  Initial biomass value: {solution_value:.4f}")
+    print(f"    kinGEMs biomass: {solution_value:.4f}")
+
+    # Show comparison
+    reduction = (1 - solution_value / cobra_biomass) * 100 if cobra_biomass > 0 else 0
+    print("\n  Comparison:")
+    print(f"    Standard FBA:           {cobra_biomass:.4f}")
+    print(f"    Enzyme-constrained FBA: {solution_value:.4f}")
+    print(f"    Reduction due to enzyme budget: {reduction:.1f}%")
 
     # For ModelSEED models, we need to let the optimization system handle constraints
     # Don't manually add enzyme constraints - let simulated annealing use the optimization framework
@@ -585,14 +601,14 @@ def main():
     biomass_goal = sa_config.get('biomass_goal', 0.5)
     verbose = sa_config.get('verbose', False)
 
-    print(f"  Configuration:")
+    print("  Configuration:")
     print(f"    - Temperature: {temperature}")
     print(f"    - Cooling rate: {cooling_rate}")
     print(f"    - Max iterations: {max_iterations}")
     print(f"    - Max unchanged iterations: {max_unchanged_iterations}")
     print(f"    - Change threshold: {change_threshold}")
     print(f"    - Biomass goal: {biomass_goal}")
-    print(f"  Starting optimization...\n")
+    print("  Starting optimization...\n")
 
     kcat_dict, top_targets, df_new, iterations, biomasses, df_FBA = simulated_annealing(
         model=model,
@@ -612,7 +628,7 @@ def main():
     )
 
     improvement = (biomasses[-1] - biomasses[0]) / biomasses[0] * 100 if biomasses[0] > 0 else 0
-    print(f"\n  Annealing complete!")
+    print("\n  Annealing complete!")
     print(f"  Initial biomass: {biomasses[0]:.4f}")
     print(f"  Final biomass: {biomasses[-1]:.4f}")
     print(f"  Improvement: {improvement:.1f}%")
@@ -620,7 +636,7 @@ def main():
 
     # Show biomass progression
     if len(biomasses) > 1:
-        print(f"\n  Biomass progression:")
+        print("\n  Biomass progression:")
         step = max(1, len(biomasses) // 10)  # Show up to 10 checkpoints
         for i in range(0, len(biomasses), step):
             if i == 0:
@@ -680,7 +696,7 @@ def main():
     print(f"Initial biomass: {biomasses[0]:.4f}")
     print(f"Final biomass: {biomasses[-1]:.4f}")
     print(f"Improvement: {improvement:.1f}%")
-    print(f"Iterations: {iterations}")
+    print(f"Iterations: {len(iterations)}")
     print(f"\nResults directory: {tuning_results_dir}")
     print(f"Final model: {model_output_path}")
     print("="*70)

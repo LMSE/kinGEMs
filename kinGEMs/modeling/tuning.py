@@ -23,6 +23,7 @@ from .optimize import run_optimization_with_dataframe
 
 warnings.filterwarnings('ignore')
 import logging
+
 logging.getLogger('distributed').setLevel(logging.ERROR)
 try:
     import gurobipy
@@ -144,20 +145,20 @@ def simulated_annealing(
     # Check for duplicates BEFORE deduplication
     duplicates = top_targets.duplicated(subset=['Reactions', 'Single_gene'], keep=False)
     if duplicates.any():
-        print(f"[INFO] Found {duplicates.sum()} duplicate reaction-gene pairs in {len(top_targets)} total rows")
-        print(f"[INFO] Deduplicating to keep only first occurrence of each (Reaction, Gene) pair...")
+        # print(f"[INFO] Found {duplicates.sum()} duplicate reaction-gene pairs in {len(top_targets)} total rows")
+        # print(f"[INFO] Deduplicating to keep only first occurrence of each (Reaction, Gene) pair...")
         top_targets = top_targets.drop_duplicates(subset=['Reactions', 'Single_gene'], keep='first').reset_index(drop=True)
-        print(f"[INFO] After deduplication: {len(top_targets)} unique reaction-gene pairs")
+        # print(f"[INFO] After deduplication: {len(top_targets)} unique reaction-gene pairs")
 
-    print(f"\n[ANNEALING DEBUG] Top 5 target enzymes:")
-    print(top_targets.head()[['Reactions', 'Single_gene', 'enzyme_mass', 'kcat_mean']])
-    print(f"[ANNEALING DEBUG] Total targets: {len(top_targets)}")
+    # print(f"\n[ANNEALING DEBUG] Top 5 target enzymes:")
+    # print(top_targets.head()[['Reactions', 'Single_gene', 'enzyme_mass', 'kcat_mean']])
+    # print(f"[ANNEALING DEBUG] Total targets: {len(top_targets)}")
 
     # Verify these reactions/genes exist in processed_data
     for idx, row in top_targets.head(3).iterrows():
         rxn, gene = row['Reactions'], row['Single_gene']
         matches = processed_data[(processed_data['Reactions']==rxn) & (processed_data['Single_gene']==gene)]
-        print(f"[DEBUG] {rxn}_{gene}: found {len(matches)} matches in processed_data, kcat_mean={matches['kcat_mean'].iloc[0] if len(matches)>0 else 'NOT FOUND'}")
+        # print(f"[DEBUG] {rxn}_{gene}: found {len(matches)} matches in processed_data, kcat_mean={matches['kcat_mean'].iloc[0] if len(matches)>0 else 'NOT FOUND'}")
 
     largest_rxn_id  = top_targets['Reactions'].tolist()
     largest_gene_id = top_targets['Single_gene'].tolist()
@@ -211,11 +212,11 @@ def simulated_annealing(
 
             # Check if there are multiple matches and what their values are
             matches = updated_df.loc[(updated_df['Reactions']==first_rxn) & (updated_df['Single_gene']==first_gene), 'kcat_mean']
-            if len(matches) > 1:
-                print(f"\n  [DEBUG] {first_rxn}_{first_gene} has {len(matches)} rows with kcats: {matches.tolist()}")
-                print(f"  [DEBUG] Average that will be used: {matches.mean():.6f} s⁻¹")
-            else:
-                print(f"\n  [DEBUG] First target {first_rxn}_{first_gene}: old={old_val:.6f} s⁻¹, new={new_val:.6f} s⁻¹, changed={old_val != new_val}")
+            # if len(matches) > 1:
+            #     print(f"\n  [DEBUG] {first_rxn}_{first_gene} has {len(matches)} rows with kcats: {matches.tolist()}")
+            #     print(f"  [DEBUG] Average that will be used: {matches.mean():.6f} s⁻¹")
+            # else:
+            #     print(f"\n  [DEBUG] First target {first_rxn}_{first_gene}: old={old_val:.6f} s⁻¹, new={new_val:.6f} s⁻¹, changed={old_val != new_val}")
 
         # EVALUATE with updated kcats
         new_biomass, temp_df_FBA, _, _ = run_optimization_with_dataframe(
@@ -236,7 +237,7 @@ def simulated_annealing(
             if len(old_enzyme) > 0 and len(new_enzyme) > 0:
                 old_alloc = old_enzyme[old_enzyme['Variable']=='enzyme']['Value'].iloc[0] if len(old_enzyme[old_enzyme['Variable']=='enzyme']) > 0 else 0
                 new_alloc = new_enzyme[new_enzyme['Variable']=='enzyme']['Value'].iloc[0] if len(new_enzyme[new_enzyme['Variable']=='enzyme']) > 0 else 0
-                print(f"  [DEBUG] Enzyme allocation for {largest_gene_id[0]}: {old_alloc:.6e} → {new_alloc:.6e} mmol/gDW/h")
+                # print(f"  [DEBUG] Enzyme allocation for {largest_gene_id[0]}: {old_alloc:.6e} → {new_alloc:.6e} mmol/gDW/h")
 
         if verbose:
             print(f"Proposed biomass = {new_biomass:.6e}")
@@ -248,8 +249,8 @@ def simulated_annealing(
         accept = prob > random_val
 
         # Debug output for non-verbose mode
-        if not verbose and iteration <= 3:
-            print(f"\n  [DEBUG Iter {iteration}] current={current_biomass:.6f}, proposed={new_biomass:.6f}, prob={prob:.4f}, random={random_val:.4f}, accept={accept}")
+        # if not verbose and iteration <= 3:
+            # print(f"\n  [DEBUG Iter {iteration}] current={current_biomass:.6f}, proposed={new_biomass:.6f}, prob={prob:.4f}, random={random_val:.4f}, accept={accept}")
 
         if accept:
             if verbose:
