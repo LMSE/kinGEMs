@@ -623,7 +623,8 @@ def simulate_phenotype_parallel(
     thresh=0.001,
     n_workers=None,
     chunk_size=None,
-    method='dask'
+    method='dask',
+    skip_baseline=False
 ):
     """
     Parallel version of simulate_phenotype using Dask or multiprocessing.
@@ -658,14 +659,16 @@ def simulate_phenotype_parallel(
         Tasks per chunk (default: auto-calculate)
     method : str
         'dask' or 'multiprocessing' (default: 'dask')
+    skip_baseline : bool, optional
+        If True, skip baseline simulation and only run enzyme-constrained (default: False)
 
     Returns
     -------
     tuple
         (baseline_GEM, enzyme_constrained_GEM) as numpy arrays
     """
-    import os
     import logging
+    import os
 
     # Determine number of workers
     if n_workers is None:
@@ -677,10 +680,11 @@ def simulate_phenotype_parallel(
 
     # Calculate optimal chunk size
     if chunk_size is None:
-        # Aim for ~15-20 chunks per worker
-        chunk_size = max(1, total_tasks // (n_workers * 15))
+        # For validation, use moderate chunks for better performance
+        # Aim for ~20-50 chunks per worker
+        chunk_size = max(1, total_tasks // (n_workers * 30))
 
-    print(f"\n  Parallel validation configuration:")
+    print("\n  Parallel validation configuration:")
     print(f"    Method: {method}")
     print(f"    Workers: {n_workers}")
     print(f"    Total simulations: {total_tasks} ({n_genes} genes × {n_carbons} carbons)")
@@ -724,38 +728,53 @@ def simulate_phenotype_parallel(
     chunks = [tasks[i:i+chunk_size] for i in range(0, len(tasks), chunk_size)]
 
     # ===== Baseline GEM Simulation (Parallel) =====
-    print(f"\n  Starting parallel baseline GEM simulation...")
+    baseline_GEM = None
 
-    if method.lower() == 'multiprocessing':
-        baseline_results = _run_validation_multiprocessing(
-            model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-            objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'
-        )
-    else:  # dask
-        baseline_results = _run_validation_dask(
-            model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-            objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'
-        )
+    if skip_baseline:
+        print("\n  ⏭️  Skipping baseline GEM simulation (already completed)")
+        baseline_GEM = np.zeros((n_genes, n_carbons), dtype=float)
+    else:
+        print("\n  Starting parallel baseline GEM simulation...")
 
-    # Flatten results
-    flat_baseline = []
-    for chunk_results in baseline_results:
-        flat_baseline.extend(chunk_results)
+        if method.lower() == 'multiprocessing':
+            baseline_results = _run_validation_multiprocessing(
+                model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
+                objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'
+            )
+        else:  # dask
+            try:
+                baseline_results = _run_validation_dask(
+                    model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
+                    objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'
+                )
+            except Exception as e:
+                print(f"    ⚠️  Dask failed, switching to multiprocessing: {e}")
+                baseline_results = _run_validation_multiprocessing(
+                    model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
+                    objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'
+                )
 
-    # Build baseline matrix
-    baseline_GEM = np.zeros((n_genes, n_carbons), dtype=float)
-    for gene, carbon_idx, growth_value in flat_baseline:
-        gene_idx = name_genes_matched_adj.index(gene)
-        baseline_GEM[gene_idx, carbon_idx] = growth_value
+        # Flatten results
+        flat_baseline = []
+        for chunk_results in baseline_results:
+            flat_baseline.extend(chunk_results)
 
-    # Fill in cached carbon sources
-    for cached_idx, original_idx in carbon_cache_map.items():
-        baseline_GEM[:, cached_idx] = baseline_GEM[:, original_idx]
+        # Build baseline matrix
+        baseline_GEM = np.zeros((n_genes, n_carbons), dtype=float)
+        # Convert to list if numpy array for indexing
+        genes_list = list(name_genes_matched_adj) if isinstance(name_genes_matched_adj, np.ndarray) else name_genes_matched_adj
+        for gene, carbon_idx, growth_value in flat_baseline:
+            gene_idx = genes_list.index(gene)
+            baseline_GEM[gene_idx, carbon_idx] = growth_value
 
-    print(f"  Baseline GEM simulation complete.")
+        # Fill in cached carbon sources
+        for cached_idx, original_idx in carbon_cache_map.items():
+            baseline_GEM[:, cached_idx] = baseline_GEM[:, original_idx]
+
+        print("  Baseline GEM simulation complete.")
 
     # ===== Enzyme-constrained GEM Simulation (Parallel) =====
-    print(f"\n  Starting parallel enzyme-constrained GEM simulation...")
+    print("\n  Starting parallel enzyme-constrained GEM simulation...")
 
     # Clean processed_df
     if 'kcat_mean' in processed_df.columns:
@@ -763,16 +782,26 @@ def simulate_phenotype_parallel(
             lambda x: float(x) if isinstance(x, str) and x.replace('.','',1).isdigit() else x
         )
 
+    # Get genes_list for indexing (need it for enzyme section too)
+    genes_list = list(name_genes_matched_adj) if isinstance(name_genes_matched_adj, np.ndarray) else name_genes_matched_adj
+
     if method.lower() == 'multiprocessing':
         enzyme_results = _run_validation_multiprocessing(
             model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
             objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme'
         )
     else:  # dask
-        enzyme_results = _run_validation_dask(
-            model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-            objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme'
-        )
+        try:
+            enzyme_results = _run_validation_dask(
+                model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
+                objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme'
+            )
+        except Exception as e:
+            print(f"    ⚠️  Dask failed, switching to multiprocessing: {e}")
+            enzyme_results = _run_validation_multiprocessing(
+                model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
+                objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme'
+            )
 
     # Flatten results
     flat_enzyme = []
@@ -781,49 +810,34 @@ def simulate_phenotype_parallel(
 
     # Build enzyme-constrained matrix
     enzyme_constrained_GEM = np.zeros((n_genes, n_carbons), dtype=float)
+    # Use the same genes_list from baseline section
     for gene, carbon_idx, growth_value in flat_enzyme:
-        gene_idx = name_genes_matched_adj.index(gene)
+        gene_idx = genes_list.index(gene)
         enzyme_constrained_GEM[gene_idx, carbon_idx] = growth_value
 
     # Fill in cached carbon sources
     for cached_idx, original_idx in carbon_cache_map.items():
         enzyme_constrained_GEM[:, cached_idx] = enzyme_constrained_GEM[:, original_idx]
 
-    print(f"  Enzyme-constrained GEM simulation complete.")
-    print(f"\n  Parallel validation simulations finished!")
+    print("  Enzyme-constrained GEM simulation complete.")
+    print("\n  Parallel validation simulations finished!")
 
     return baseline_GEM, enzyme_constrained_GEM
 
 
 def _run_validation_dask(model, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
                         objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'):
-    """Execute validation using Dask."""
+    """Execute validation using Dask with HPC-friendly configuration."""
     import logging
+    import tempfile
 
     try:
-        from dask import compute, delayed
-        from dask.distributed import Client
+        from dask import delayed
+        from dask.distributed import Client, LocalCluster
     except ImportError:
         raise ImportError(
             "Dask is required for parallel validation. Install with: pip install dask[distributed]"
         )
-
-    # Create Dask client
-    client = None
-    try:
-        client = Client(
-            n_workers=n_workers,
-            processes=True,
-            threads_per_worker=1,
-            silence_logs=logging.ERROR
-        )
-        try:
-            print(f"    Dask dashboard: {client.dashboard_link}")
-        except Exception:
-            print("    Dask dashboard: (install bokeh>=3.1.0 to enable dashboard)")
-    except Exception as e:
-        print(f"    ⚠️  Warning: Could not start Dask client: {e}")
-        print("    Falling back to sequential execution...")
 
     # Create delayed tasks
     tasks = []
@@ -841,16 +855,83 @@ def _run_validation_dask(model, processed_df, chunks, medium_ex_inds, carbon_ex_
             )
         )
 
-    # Execute
+    # Configure Dask for slow tasks and HPC environment
+    import dask
+    dask.config.set({
+        'distributed.comm.timeouts.connect': '120s',
+        'distributed.comm.timeouts.tcp': '120s',
+        'distributed.scheduler.idle-timeout': '7200s',
+        'distributed.worker.profile.interval': '10000ms',
+        'distributed.worker.profile.cycle': '100000ms',
+        'distributed.scheduler.allowed-failures': 10,  # Allow some task retries
+        'distributed.worker.daemon': False,  # Easier cleanup on HPC
+    })
+
+    cluster = None
+    client = None
+
     try:
-        results = compute(*tasks)
+        # Use SLURM_TMPDIR if available (Compute Canada standard), otherwise temp dir
+        import os
+        local_dir = os.environ.get('SLURM_TMPDIR', tempfile.gettempdir())
+
+        # Create cluster explicitly with HPC-friendly settings
+        cluster = LocalCluster(
+            n_workers=n_workers,
+            processes=True,
+            threads_per_worker=1,
+            silence_logs=logging.ERROR,
+            local_directory=local_dir,
+            death_timeout='30s',  # Kill workers faster if they hang
+        )
+
+                # Connect client to cluster
+        client = Client(cluster, timeout='60s')
+
+        print(f"    Dask cluster created with {n_workers} workers")
+        try:
+            print(f"    Dask dashboard: {client.dashboard_link}")
+        except Exception as e:
+            print("    Dask dashboard: (not available - install bokeh>=3.1.0)")
+
+        # Execute tasks with progress tracking
+        print(f"    Submitting {len(tasks)} chunks to Dask workers...")
+        import sys
+        sys.stdout.flush()  # Force print before compute
+        from dask.distributed import progress
+        futures = client.compute(tasks)
+
+        # Wait for results with progress
+        try:
+            progress(futures)
+        except Exception:
+            # Progress bar not available, just wait
+            pass
+
+        results = client.gather(futures)
+
+        print("    ✓ Results gathered successfully")
+
+        return results
+
+    except Exception as e:
+        print(f"    ⚠️  Dask execution failed: {e}")
+        print("    Falling back to sequential execution...")
+        raise
+
     finally:
-        if client:
-            client.close()
+        # Aggressive cleanup - close client and cluster separately
+        if client is not None:
+            try:
+                client.close(timeout=2)
+            except Exception:
+                pass
 
-    return results
-
-
+        if cluster is not None:
+            try:
+                cluster.close(timeout=5)
+            except Exception:
+                pass
 def _run_validation_multiprocessing(model, processed_df, chunks, medium_ex_inds,
                                     carbon_ex_inds, objective_reaction,
                                     enzyme_upper_bound, n_workers, mode='baseline'):

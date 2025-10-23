@@ -657,7 +657,7 @@ def flux_variability_analysis_parallel_chunked(model, processed_df, biomass_reac
         # Aim for ~10-20 chunks per worker for good load balancing
         chunk_size = max(1, n_reactions // (n_workers * 15))
 
-    print(f"  Parallel FVA configuration:")
+    print("  Parallel FVA configuration:")
     print(f"    Method: {method}")
     print(f"    Workers: {n_workers}")
     print(f"    Reactions: {n_reactions}")
@@ -683,7 +683,7 @@ def flux_variability_analysis_parallel_chunked(model, processed_df, biomass_reac
         estimated_memory_gb = (model_size_mb * n_workers) / 1000
         print(f"    Estimated memory: ~{estimated_memory_gb:.1f} GB")
         if estimated_memory_gb > 8:
-            print(f"    ⚠️  Warning: High memory usage expected")
+            print("    ⚠️  Warning: High memory usage expected")
     except Exception:
         pass  # Skip memory estimation if it fails
 
@@ -816,8 +816,8 @@ def _run_fva_multiprocessing(model, processed_df, chunks, biomass_bounds,
                              promiscuous_off, complexes_off,
                              n_workers):
     """Execute FVA using multiprocessing.Pool."""
-    from multiprocessing import Pool
     from functools import partial
+    from multiprocessing import Pool
 
     # Create partial function with fixed arguments
     worker_func = partial(

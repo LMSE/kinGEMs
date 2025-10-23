@@ -219,6 +219,30 @@ def main():
     print(f"  Genes in model: {len(model.genes)}")
     print(f"  Reactions in model: {len(model.reactions)}")
 
+    # Set solver
+    solver_name = config.get('solver', None)
+    if solver_name:
+        try:
+            model.solver = solver_name
+            print(f"  Using solver: {solver_name.upper()}")
+        except Exception as e:
+            print(f"  ⚠️  Could not set solver to {solver_name}: {e}")
+            print(f"  Using default solver: {model.solver.interface.__name__}")
+    else:
+        # Auto-detect best solver
+        for best_solver in ['cplex', 'gurobi', 'scip', 'glpk']:
+            try:
+                model.solver = best_solver
+                print(f"  Auto-detected solver: {best_solver.upper()}")
+                break
+            except Exception:
+                continue
+
+    current_solver = model.solver.interface.__name__
+    if 'glpk' in current_solver.lower():
+        print("  ⚠️  WARNING: Using GLPK solver (slow, creates temp files)")
+        print("  ⚠️  Consider loading CPLEX module or installing SCIP for better performance")
+
     # Auto-detect objective reaction if not specified
     if objective_reaction is None:
         obj_rxns = {rxn.id: rxn.objective_coefficient
@@ -319,7 +343,7 @@ def main():
 
             # Run simulation
             if use_parallel:
-                print("  Using PARALLEL simulation")
+                print("  Using PARALLEL simulation (skipping baseline - already completed)")
                 _, pre_tuning_GEM = simulate_phenotype_parallel(
                     model_run=model_adj,
                     name_genes_matched_adj=name_genes_matched_adj,
@@ -331,7 +355,8 @@ def main():
                     enzyme_upper_bound=enzyme_upper_bound,
                     n_workers=n_workers,
                     chunk_size=chunk_size,
-                    method=parallel_method
+                    method=parallel_method,
+                    skip_baseline=True  # Skip baseline, only run enzyme-constrained
                 )
             else:
                 print("  Using SEQUENTIAL simulation")
