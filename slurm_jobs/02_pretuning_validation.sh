@@ -7,11 +7,15 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --time=0-15:00:00
 #SBATCH --mem=60G
-#SBATCH --output=logs/pretuning_%j.out
-#SBATCH --error=logs/pretuning_%j.err
+#SBATCH --output=/project/def-mahadeva/ranaab/kinGEMs_v2/logs/pretuning_%j.out
+#SBATCH --error=/project/def-mahadeva/ranaab/kinGEMs_v2/logs/pretuning_%j.err
 #SBATCH --mail-user=ranamoneim@gmail.com
 #SBATCH --mail-type=BEGIN,END,FAIL
 # ---------------------------------------------------------------------
+
+# Change to project directory
+cd /project/def-mahadeva/ranaab/kinGEMs_v2 || exit 1
+
 echo "========================================="
 echo "Job: Pre-tuning kinGEMs Validation"
 echo "Job ID: $SLURM_JOB_ID"
@@ -24,9 +28,15 @@ echo "========================================="
 # Load required modules
 module load python/3.11
 
-# Optional: Load CPLEX for faster optimization (10-20x speedup)
-# Uncomment if CPLEX is available on your cluster:
-# module load cplex/22.1.1
+# Load personal CPLEX module for 40x faster optimization
+export MODULEPATH=$HOME/modulefiles:$MODULEPATH
+module load mycplex/22.1.1
+
+# Verify CPLEX is accessible
+echo "Checking CPLEX availability..."
+which cplex || echo "⚠️  CPLEX not found in PATH"
+export PATH=$HOME/cplex_studio2211/cplex/bin/x86-64_linux:$PATH
+which cplex && echo "✓ CPLEX found: $(which cplex)"
 
 # Activate virtual environment
 source venv/bin/activate

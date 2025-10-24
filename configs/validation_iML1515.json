@@ -8,7 +8,7 @@
   "enzyme_upper_bound": 0.15,
 
   "_comment_solver": "Solver to use (cplex, gurobi, scip, glpk). null = auto-detect best",
-  "solver": null,
+  "solver": "cplex",
 
   "_comment_data_paths": "Paths to processed DataFrames with kcat values",
   "pre_tuning_data_path": "data/processed/iML1515_GEM/iML1515_GEM_processed_data.csv",
@@ -26,8 +26,8 @@
     "method": "dask",
     "_comment_method": "Options: 'dask' (distributed) or 'multiprocessing' (simpler, more reliable on HPC)",
     "_comment_workers": "Set to 3 workers with 4 CPUs allocated (1 CPU for scheduler/overhead). Optimized for 60GB memory",
-    "chunk_size": 100,
-    "_comment_chunk_size": "Tasks per chunk. Larger chunks = fewer model copies in memory. null = auto-calculate"
+    "chunk_size": 25,
+    "_comment_chunk_size": "Tasks per chunk. Reduced to 25 to prevent worker death and memory issues. With CPLEX: 25 tasks @ 0.5s = 12.5s per chunk (well under timeouts)"
   },
 
   "_comment_thresholds": "Thresholds for binary classification",

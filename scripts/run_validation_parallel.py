@@ -151,6 +151,20 @@ def main():
 
     # Set solver
     solver_name = config.get('solver', None)
+    
+    # Verify Pyomo can find CPLEX if requested
+    if solver_name and solver_name.lower() == 'cplex':
+        try:
+            from pyomo.opt import SolverFactory
+            cplex_solver = SolverFactory('cplex')
+            if cplex_solver.available():
+                print(f"  ✓ Pyomo found CPLEX solver: {cplex_solver.executable()}")
+            else:
+                print("  ⚠️  WARNING: CPLEX requested but not available to Pyomo!")
+                print("  Pyomo will fall back to GLPK (slower)")
+        except Exception as e:
+            print(f"  ⚠️  Could not verify CPLEX in Pyomo: {e}")
+    
     if solver_name:
         try:
             model.solver = solver_name
@@ -260,7 +274,8 @@ def main():
                 n_workers=n_workers,
                 chunk_size=chunk_size,
                 method=parallel_method,
-                skip_baseline=True
+                skip_baseline=True,
+                solver_name=solver_name if solver_name else 'glpk'
             )
         else:
             print("Running SEQUENTIAL pre-tuning validation...")
@@ -302,7 +317,8 @@ def main():
                 n_workers=n_workers,
                 chunk_size=chunk_size,
                 method=parallel_method,
-                skip_baseline=True
+                skip_baseline=True,
+                solver_name=solver_name if solver_name else 'glpk'
             )
         else:
             print("Running SEQUENTIAL post-tuning validation...")

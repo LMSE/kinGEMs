@@ -2,26 +2,11 @@
 import copy
 import os
 
-import cobra
-import fastcluster
-import lightgbm as lgbm
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.cluster.hierarchy import dendrogram, linkage
-from scipy.sparse.csgraph import connected_components, shortest_path
-from scipy.stats import mannwhitneyu, pearsonr, spearmanr, ttest_ind
-from seaborn import clustermap
-import shap
-from sklearn.decomposition import PCA
-from sklearn.metrics import auc as sk_auc
-from sklearn.metrics import average_precision_score, mean_squared_error, r2_score, roc_auc_score
 from sklearn.metrics import confusion_matrix as confusion_matrix
-from sklearn.metrics import precision_recall_curve as pre_rec
-from sklearn.model_selection import train_test_split
-from statsmodels.nonparametric.smoothers_lowess import lowess
 
-from kinGEMs.config import ECOLI_VALIDATION_DIR, MODELS_DIR
+from kinGEMs.config import ECOLI_VALIDATION_DIR
 from kinGEMs.modeling.optimize import run_optimization_with_dataframe
 
 
@@ -476,9 +461,9 @@ def calculate_phenotypes_with_dataframe(
 # PARALLEL VALIDATION SIMULATION FUNCTIONS
 # ============================================================================
 
-def _simulate_gene_carbon_combo(model, processed_df, gene, carbon_idx, carbon_name,
+def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
                                 medium_ex_inds, carbon_ex_inds, objective_reaction,
-                                enzyme_upper_bound, mode='baseline'):
+                                enzyme_upper_bound, mode='baseline', solver_name='glpk'):
     """
     Simulate a single gene knockout × carbon source combination.
 
@@ -504,6 +489,8 @@ def _simulate_gene_carbon_combo(model, processed_df, gene, carbon_idx, carbon_na
         Enzyme constraint
     mode : str
         'baseline' for slim_optimize or 'enzyme' for enzyme-constrained
+    solver_name : str, optional
+        Solver to use for optimization (default: 'glpk')
 
     Returns
     -------
@@ -554,7 +541,8 @@ def _simulate_gene_carbon_combo(model, processed_df, gene, carbon_idx, carbon_na
                 output_dir=None,
                 save_results=False,
                 print_reaction_conditions=False,
-                verbose=False
+                verbose=False,
+                solver_name=solver_name
             )
             if solution_value is None or np.isnan(solution_value):
                 solution_value = 0.0
@@ -565,7 +553,7 @@ def _simulate_gene_carbon_combo(model, processed_df, gene, carbon_idx, carbon_na
 
 def _simulate_gene_carbon_chunk(model, processed_df, tasks, medium_ex_inds,
                                 carbon_ex_inds, objective_reaction,
-                                enzyme_upper_bound, mode='baseline'):
+                                enzyme_upper_bound, mode='baseline', solver_name='glpk'):
     """
     Process a chunk of gene × carbon combinations.
 
@@ -587,6 +575,8 @@ def _simulate_gene_carbon_chunk(model, processed_df, tasks, medium_ex_inds,
         Enzyme constraint
     mode : str
         'baseline' or 'enzyme'
+    solver_name : str, optional
+        Solver to use (default: 'glpk')
 
     Returns
     -------
@@ -595,7 +585,7 @@ def _simulate_gene_carbon_chunk(model, processed_df, tasks, medium_ex_inds,
     """
     results = []
     for gene, carbon_idx, carbon_name in tasks:
-        result = _simulate_gene_carbon_combo(
+        result = _simulate_gene_carbon(
             model=model.copy(),
             processed_df=processed_df,
             gene=gene,
@@ -605,7 +595,8 @@ def _simulate_gene_carbon_chunk(model, processed_df, tasks, medium_ex_inds,
             carbon_ex_inds=carbon_ex_inds,
             objective_reaction=objective_reaction,
             enzyme_upper_bound=enzyme_upper_bound,
-            mode=mode
+            mode=mode,
+            solver_name=solver_name
         )
         results.append(result)
     return results
@@ -624,7 +615,8 @@ def simulate_phenotype_parallel(
     n_workers=None,
     chunk_size=None,
     method='dask',
-    skip_baseline=False
+    skip_baseline=False,
+    solver_name='glpk'
 ):
     """
     Parallel version of simulate_phenotype using Dask or multiprocessing.
@@ -667,7 +659,6 @@ def simulate_phenotype_parallel(
     tuple
         (baseline_GEM, enzyme_constrained_GEM) as numpy arrays
     """
-    import logging
     import os
 
     # Determine number of workers
@@ -739,19 +730,19 @@ def simulate_phenotype_parallel(
         if method.lower() == 'multiprocessing':
             baseline_results = _run_validation_multiprocessing(
                 model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-                objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'
+                objective_reaction, enzyme_upper_bound, n_workers, mode='baseline', solver_name=solver_name
             )
         else:  # dask
             try:
                 baseline_results = _run_validation_dask(
                     model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-                    objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'
+                    objective_reaction, enzyme_upper_bound, n_workers, mode='baseline', solver_name=solver_name
                 )
-            except Exception as e:
-                print(f"    ⚠️  Dask failed, switching to multiprocessing: {e}")
+            except Exception:
+                print("    ⚠️  Dask failed, switching to multiprocessing")
                 baseline_results = _run_validation_multiprocessing(
                     model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-                    objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'
+                    objective_reaction, enzyme_upper_bound, n_workers, mode='baseline', solver_name=solver_name
                 )
 
         # Flatten results
@@ -788,19 +779,19 @@ def simulate_phenotype_parallel(
     if method.lower() == 'multiprocessing':
         enzyme_results = _run_validation_multiprocessing(
             model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-            objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme'
+            objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme', solver_name=solver_name
         )
     else:  # dask
         try:
             enzyme_results = _run_validation_dask(
                 model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-                objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme'
+                objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme', solver_name=solver_name
             )
-        except Exception as e:
-            print(f"    ⚠️  Dask failed, switching to multiprocessing: {e}")
+        except Exception:
+            print("    ⚠️  Dask failed, switching to multiprocessing")
             enzyme_results = _run_validation_multiprocessing(
                 model_run, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-                objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme'
+                objective_reaction, enzyme_upper_bound, n_workers, mode='enzyme', solver_name=solver_name
             )
 
     # Flatten results
@@ -826,7 +817,7 @@ def simulate_phenotype_parallel(
 
 
 def _run_validation_dask(model, processed_df, chunks, medium_ex_inds, carbon_ex_inds,
-                        objective_reaction, enzyme_upper_bound, n_workers, mode='baseline'):
+                        objective_reaction, enzyme_upper_bound, n_workers, mode='baseline', solver_name='glpk'):
     """Execute validation using Dask with HPC-friendly configuration."""
     import logging
     import tempfile
@@ -851,7 +842,8 @@ def _run_validation_dask(model, processed_df, chunks, medium_ex_inds, carbon_ex_
                 carbon_ex_inds,
                 objective_reaction,
                 enzyme_upper_bound,
-                mode
+                mode,
+                solver_name
             )
         )
 
@@ -882,13 +874,16 @@ def _run_validation_dask(model, processed_df, chunks, medium_ex_inds, carbon_ex_
             threads_per_worker=1,
             silence_logs=logging.ERROR,
             local_directory=local_dir,
-            death_timeout='30s',  # Kill workers faster if they hang
+            death_timeout='7200s',  # 2 hours - increased to prevent premature worker death
+            memory_limit='18GB',  # Limit each worker to 18GB (3 workers × 18GB = 54GB + overhead = 60GB total)
         )
 
                 # Connect client to cluster
         client = Client(cluster, timeout='60s')
 
         print(f"    Dask cluster created with {n_workers} workers")
+        print(f"    Worker memory limit: 18GB per worker")
+        print(f"    Death timeout: 7200s (2 hours)")
         try:
             print(f"    Dask dashboard: {client.dashboard_link}")
         except Exception as e:
@@ -934,7 +929,7 @@ def _run_validation_dask(model, processed_df, chunks, medium_ex_inds, carbon_ex_
                 pass
 def _run_validation_multiprocessing(model, processed_df, chunks, medium_ex_inds,
                                     carbon_ex_inds, objective_reaction,
-                                    enzyme_upper_bound, n_workers, mode='baseline'):
+                                    enzyme_upper_bound, n_workers, mode='baseline', solver_name='glpk'):
     """Execute validation using multiprocessing.Pool."""
     from functools import partial
     from multiprocessing import Pool
@@ -948,7 +943,8 @@ def _run_validation_multiprocessing(model, processed_df, chunks, medium_ex_inds,
         carbon_ex_inds=carbon_ex_inds,
         objective_reaction=objective_reaction,
         enzyme_upper_bound=enzyme_upper_bound,
-        mode=mode
+        mode=mode,
+        solver_name=solver_name
     )
 
     # Execute in parallel
