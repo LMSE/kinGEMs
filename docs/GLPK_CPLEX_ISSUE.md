@@ -1,6 +1,6 @@
 # GLPK vs CPLEX Issue - Resolution
 
-**Date**: November 4, 2025  
+**Date**: November 4, 2025
 **Jobs Affected**: 10345213, 10345214, 10359950, 10359951
 
 ## Problem
@@ -84,7 +84,7 @@ Progress: 1/75 chunks (442/33150 simulations, 1.3%)
 ## Files Changed
 
 1. `slurm_jobs/02_pretuning_validation.sh` - Added CPLEX environment vars
-2. `slurm_jobs/03_posttuning_validation.sh` - Added CPLEX environment vars  
+2. `slurm_jobs/03_posttuning_validation.sh` - Added CPLEX environment vars
 3. `kinGEMs/modeling/optimize.py` - Added solver availability check
 4. `kinGEMs/validation_utils.py` - Improved progress tracking with stdout flush
 

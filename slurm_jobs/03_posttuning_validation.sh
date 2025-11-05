@@ -4,9 +4,9 @@
 # ---------------------------------------------------------------------
 #SBATCH --job-name=posttuning_kinGEMs
 #SBATCH --account=def-mahadeva
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --time=0-15:00:00
-#SBATCH --mem=60G
+#SBATCH --mem=120G
 #SBATCH --output=/project/def-mahadeva/ranaab/kinGEMs_v2/logs/posttuning_%j.out
 #SBATCH --error=/project/def-mahadeva/ranaab/kinGEMs_v2/logs/posttuning_%j.err
 #SBATCH --mail-user=ranamoneim@gmail.com

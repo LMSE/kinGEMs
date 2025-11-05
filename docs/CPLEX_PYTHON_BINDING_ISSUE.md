@@ -1,6 +1,6 @@
 # CPLEX Python Binding Issue
 
-**Date**: November 4, 2025  
+**Date**: November 4, 2025
 **Jobs**: 10362119 (pre-tuning), 10362120 (post-tuning)
 
 ## Problem
@@ -18,7 +18,7 @@ ApplicationError: Solver (cplex) not available
 ### Root Cause
 
 1. **CPLEX binary exists**: `/home/ranaab/cplex_studio2211/cplex/bin/x86-64_linux/cplex` ✓
-2. **Pyomo can see it**: "✓ Pyomo found CPLEX solver" ✓  
+2. **Pyomo can see it**: "✓ Pyomo found CPLEX solver" ✓
 3. **Python bindings missing**: CPLEX 22.1.1 only has Python 3.10 support, not 3.11 ✗
 
 Attempting to install:
@@ -48,8 +48,8 @@ The `setup.py` is incompatible with modern pip and Python 3.11.
 
 ### Option 1: Let Current Jobs Finish (RECOMMENDED)
 
-✅ **Jobs are running and making progress**  
-✅ **Progress tracking is working**  
+✅ **Jobs are running and making progress**
+✅ **Progress tracking is working**
 ✅ **No action needed**
 
 Estimated completion: **15-20 hours from start** (around 12:00-5:00 AM PST tomorrow)
@@ -72,7 +72,7 @@ pip install -r requirements.txt
 pip install /home/ranaab/cplex_studio2211/python/
 ```
 
-**Pros**: Full CPLEX support (4× faster)  
+**Pros**: Full CPLEX support (4× faster)
 **Cons**: Requires rebuilding environment, may have dependency issues
 
 ### Option 3: Install CBC Solver (Future)
@@ -89,12 +89,12 @@ Then update config:
 "solver": "cbc"
 ```
 
-**Pros**: 2-3× faster than GLPK, no license needed  
+**Pros**: 2-3× faster than GLPK, no license needed
 **Cons**: Still slower than CPLEX
 
 ## Recommendation
 
-**Let the current jobs finish**. They're running correctly, just slower than optimal. The progress tracking is working, so you can monitor them. 
+**Let the current jobs finish**. They're running correctly, just slower than optimal. The progress tracking is working, so you can monitor them.
 
 The validation will complete successfully in 15-20 hours. Once you have the results, you can decide if the performance is acceptable or if you want to invest time in setting up Python 3.10 + CPLEX for future runs.
 
@@ -120,7 +120,7 @@ Progress: 3/75 chunks (1326/33150 simulations, 4.0%)
 ### No Changes Needed
 
 - ✓ Progress tracking working
-- ✓ Multiprocessing working  
+- ✓ Multiprocessing working
 - ✓ Memory allocation sufficient (60GB)
 - ✓ SLURM configuration correct
 

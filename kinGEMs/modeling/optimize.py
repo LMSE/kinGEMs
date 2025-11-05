@@ -429,7 +429,7 @@ def run_optimization(
     # 8) Solve
     # print("Step 8: Setting up and running solver...")
     solver = SolverFactory(solver_name)
-    
+
     # Debug: Check if solver is available
     if not solver.available():
         if verbose:
