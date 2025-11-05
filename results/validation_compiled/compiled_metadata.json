@@ -1,5 +1,5 @@
 {
-  "compilation_timestamp": "2025-11-05T11:11:43.792150",
+  "compilation_timestamp": "2025-11-05T11:15:11.021919",
   "input_directory": "results/validation_parallel",
   "output_directory": "results/validation_compiled",
   "baseline": {
