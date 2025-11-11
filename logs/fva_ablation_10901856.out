@@ -143,3 +143,62 @@ Loaded processed data: 33657 rows
 [FVA] Min optimization done for DGUNC: 0.0
 [FVA] Finished optimization for reaction: DGUNC
 [FVA] Starting optimization for reaction: CDGUNPD
+[FVA] Min optimization done for AACPS4: 108.97957587465284
+[FVA] Finished optimization for reaction: AACPS4
+[FVA] Starting optimization for reaction: EX_rmn_e
+[FVA] Max optimization done for RNDR4: 47.36838385178789
+[FVA] Max optimization done for EX_LalaDgluMdap_e: 3.0321583932882037
+[FVA] Max optimization done for PG120abcpp: 43.58946253979867
+[FVA] Max optimization done for EX_rmn_e: 0.0
+[FVA] Min optimization done for RNDR4: 0.0
+[FVA] Finished optimization for reaction: RNDR4
+[FVA] Starting optimization for reaction: TMDS
+[FVA] Min optimization done for PG120abcpp: 0.0
+[FVA] Finished optimization for reaction: PG120abcpp
+[FVA] Starting optimization for reaction: PE140abcpp
+[FVA] Min optimization done for EX_LalaDgluMdap_e: 0.0
+[FVA] Finished optimization for reaction: EX_LalaDgluMdap_e
+[FVA] Starting optimization for reaction: EX_anhgm_e
+[FVA] Min optimization done for EX_rmn_e: 0.0
+[FVA] Finished optimization for reaction: EX_rmn_e
+[FVA] Starting optimization for reaction: EX_ttdca_e
+[FVA] Max optimization done for CPPPGO: 1.248397560631106
+[FVA] Max optimization done for EX_ttdca_e: 0.0
+[FVA] Min optimization done for CPPPGO: 0.0
+[FVA] Finished optimization for reaction: CPPPGO
+[FVA] Starting optimization for reaction: GTHOr
+[FVA] Min optimization done for EX_ttdca_e: 0.0
+[FVA] Finished optimization for reaction: EX_ttdca_e
+[FVA] Starting optimization for reaction: AMANK
+[FVA] Max optimization done for AMANK: 0.0
+[FVA] Min optimization done for AMANK: 0.0
+[FVA] Finished optimization for reaction: AMANK
+[FVA] Starting optimization for reaction: EX_glyclt_e
+[FVA] Max optimization done for EX_glyclt_e: 0.000320457426399613
+[FVA] Min optimization done for EX_glyclt_e: 0.0
+[FVA] Finished optimization for reaction: EX_glyclt_e
+[FVA] Starting optimization for reaction: EX_g6p_e
+[FVA] Max optimization done for EX_g6p_e: 0.0
+[FVA] Max optimization done for FEENTERtpp: 69.74319062527161
+[FVA] Min optimization done for FEENTERtpp: 0.0
+[FVA] Finished optimization for reaction: FEENTERtpp
+[FVA] Starting optimization for reaction: FEENTERtex
+[FVA] Min optimization done for EX_g6p_e: 0.0
+[FVA] Finished optimization for reaction: EX_g6p_e
+[FVA] Starting optimization for reaction: EX_2ddglcn_e
+[FVA] Max optimization done for EX_2ddglcn_e: 0.0
+[FVA] Max optimization done for MALt3pp: 871.7892507959793
+[FVA] Max optimization done for CDGUNPD: 54.48682817474861
+[FVA] Min optimization done for EX_2ddglcn_e: 0.0
+[FVA] Finished optimization for reaction: EX_2ddglcn_e
+[FVA] Starting optimization for reaction: EX_galct__D_e
+[FVA] Min optimization done for MALt3pp: 0.0
+[FVA] Finished optimization for reaction: MALt3pp
+[FVA] Starting optimization for reaction: CITt3pp
+[FVA] Max optimization done for EX_galct__D_e: 0.0
+[FVA] Min optimization done for CDGUNPD: 0.0
+[FVA] Finished optimization for reaction: CDGUNPD
+[FVA] Starting optimization for reaction: LDGUNPD
+[FVA] Min optimization done for EX_galct__D_e: 0.0
+[FVA] Finished optimization for reaction: EX_galct__D_e
+[FVA] Starting optimization for reaction: EX_idon__L_e
