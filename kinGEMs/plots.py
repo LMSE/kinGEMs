@@ -810,10 +810,9 @@ def plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats, output
         plt.savefig(os.path.join(output_dir, f"{prefix}kcat_scatter.png"), dpi=300, bbox_inches='tight')
 
 def calculate_flux_metrics(fva_df):
-    """Calculate both Flux Variability (FVi) and Flux Variability Range (FVR).
+    """Calculate Flux Variability (FVi) as absolute flux range.
 
-    FVi = (max - min) / (max + min + ε) - Relative variability (0-1 scale) for reaction i
-    FVR = |max - min| - Absolute flux range
+    FVi = |max - min| - Absolute flux range for reaction i
 
     Parameters
     ----------
@@ -822,20 +821,16 @@ def calculate_flux_metrics(fva_df):
 
     Returns
     -------
-    tuple
-        (fvi, fvr) as pandas Series
+    pandas.Series
+        FVi values (absolute flux ranges)
     """
     max_flux = fva_df['Max Solutions']
     min_flux = fva_df['Min Solutions']
 
-    # Calculate FVR (Flux Variability Range) - absolute difference
-    fvr = (max_flux - min_flux).abs()
+    # Calculate FVi (Flux Variability for reaction i) - absolute difference
+    fvi = (max_flux - min_flux).abs()
 
-    # Calculate FVi (Flux Variability for reaction i) - normalized relative variability
-    fvi = (max_flux - min_flux) / (max_flux + min_flux + 1e-10)
-    fvi = fvi.replace([np.inf, -np.inf], 0).fillna(0)
-
-    return fvi, fvr
+    return fvi
 
 
 def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
@@ -891,7 +886,7 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
     fvi_stats = {}
 
     for label, fva_df in fva_results_dict.items():
-        fvi, fvr = calculate_flux_metrics(fva_df)
+        fvi = calculate_flux_metrics(fva_df)
         # Filter out zero values for log plotting
         fvi_nonzero = fvi[fvi > 1e-15]
         if len(fvi_nonzero) == 0:
@@ -1010,7 +1005,7 @@ def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
     }
 
     for label, fva_df in fva_results_dict.items():
-        fvi, fvr = calculate_flux_metrics(fva_df)
+        fvi = calculate_flux_metrics(fva_df)
         # Use log scale for better visualization, filter zeros
         fvi_nonzero = fvi[fvi > 1e-15]
         if len(fvi_nonzero) > 0:
@@ -1151,7 +1146,8 @@ def generate_fva_ablation_summary_statistics(fva_results_dict, biomass_dict, out
     summary_data = []
 
     for label, fva_df in fva_results_dict.items():
-        fvi, fvr = calculate_flux_metrics(fva_df)
+        fvi = calculate_flux_metrics(fva_df)
+        fvr = fvi  # FVi is the same as FVR (absolute difference)
         biomass = biomass_dict[label]
 
         # Flag reactions with high flux variability range (potential issues)
@@ -1308,7 +1304,7 @@ def plot_cumulative_fvi_distribution(fva_dataframes, labels, output_path=None,
 
     for i, (df, label) in enumerate(zip(fva_dataframes, labels)):
         # Calculate FVi using standard method
-        fvi, _ = calculate_flux_metrics(df)
+        fvi = calculate_flux_metrics(df)
 
         # Filter out invalid values
         fvi_values = fvi.values
