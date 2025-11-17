@@ -56,6 +56,7 @@ from kinGEMs.modeling.fva import (
 )
 from kinGEMs.modeling.optimize import run_optimization_with_dataframe
 from kinGEMs.modeling.tuning import simulated_annealing
+from kinGEMs.plots import create_fva_ablation_dashboard
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -97,10 +98,18 @@ def find_predictions_file(model_name, CPIPred_data_dir):
     raise FileNotFoundError(f"No predictions file found for {model_name}")
 
 
-def calculate_fvi(fva_df):
-    """Calculate Flux Variability Index for each reaction."""
-    fvi = (fva_df['Max Solutions'] - fva_df['Min Solutions']).abs()
-    return fvi
+def calculate_flux_metrics(fva_df):
+    """Calculate both Flux Variability (FVi) and Flux Variability Range (FVR).
+
+    FVi = (max - min) / (max + min + ε) - Relative variability (0-1 scale) for reaction i
+    FVR = |max - min| - Absolute flux range
+
+    Returns:
+        tuple: (fvi, fvr) as pandas Series
+    """
+    # Import from plots module to avoid duplication
+    from kinGEMs.plots import calculate_flux_metrics as calc_flux_metrics
+    return calc_flux_metrics(fva_df)
 
 
 def run_baseline_fva(model):
@@ -123,27 +132,31 @@ def run_baseline_fva(model):
 
 
 def run_single_enzyme_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
-                          use_parallel=False, n_workers=None):
+                          use_parallel=False, n_workers=None, method='dask', chunk_size=None):
     """Level 2: Single enzyme constraint only."""
     print("\n=== Level 2: Single enzyme constraint only ===")
     print("  (multi_enzyme_off=True, isoenzymes_off=True, promiscuous_off=True, complexes_off=True)")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
-        fva_df, biomass, _ = flux_variability_analysis_parallel(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis_parallel(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             output_file=None,
             enzyme_upper_bound=enzyme_upper_bound,
             n_workers=n_workers,
+            method=method,
+            chunk_size=chunk_size,
             multi_enzyme_off=True,
             isoenzymes_off=True,
             promiscuous_off=True,
             complexes_off=True
         )
+        # Extract biomass value from the FVA results
+        biomass = fva_df['Solution Biomass'].iloc[0]
     else:
-        fva_df, biomass, _ = flux_variability_analysis(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
@@ -153,6 +166,8 @@ def run_single_enzyme_fva(model, processed_df, biomass_reaction, enzyme_upper_bo
             promiscuous_off=True,
             complexes_off=True
         )
+        # Extract biomass value from the FVA results
+        biomass = fva_df['Solution Biomass'].iloc[0]
 
     print(f"  Biomass: {biomass:.4f}")
     print(f"  Reactions analyzed: {len(fva_df)}")
@@ -161,27 +176,30 @@ def run_single_enzyme_fva(model, processed_df, biomass_reaction, enzyme_upper_bo
 
 
 def run_isoenzymes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
-                       use_parallel=False, n_workers=None):
+                       use_parallel=False, n_workers=None, method='dask', chunk_size=None):
     """Level 3a: Single enzyme + isoenzymes."""
     print("\n=== Level 3a: + Isoenzymes ===")
     print("  (isoenzymes_off=False, multi_enzyme_off=True, promiscuous_off=True, complexes_off=True)")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
-        fva_df, biomass, _ = flux_variability_analysis_parallel(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis_parallel(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             output_file=None,
             enzyme_upper_bound=enzyme_upper_bound,
             n_workers=n_workers,
+            method=method,
+            chunk_size=chunk_size,
             multi_enzyme_off=True,
             isoenzymes_off=False,
             promiscuous_off=True,
             complexes_off=True
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
     else:
-        fva_df, biomass, _ = flux_variability_analysis(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
@@ -191,6 +209,7 @@ def run_isoenzymes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound
             promiscuous_off=True,
             complexes_off=True
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
 
     print(f"  Biomass: {biomass:.4f}")
     print(f"  Reactions analyzed: {len(fva_df)}")
@@ -199,27 +218,30 @@ def run_isoenzymes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound
 
 
 def run_complexes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
-                      use_parallel=False, n_workers=None):
+                      use_parallel=False, n_workers=None, method='dask', chunk_size=None):
     """Level 3b: Single enzyme + complexes."""
     print("\n=== Level 3b: + Enzyme Complexes ===")
     print("  (complexes_off=False, multi_enzyme_off=True, isoenzymes_off=True, promiscuous_off=True)")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
-        fva_df, biomass, _ = flux_variability_analysis_parallel(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis_parallel(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             output_file=None,
             enzyme_upper_bound=enzyme_upper_bound,
             n_workers=n_workers,
+            method=method,
+            chunk_size=chunk_size,
             multi_enzyme_off=True,
             isoenzymes_off=True,
             promiscuous_off=True,
             complexes_off=False
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
     else:
-        fva_df, biomass, _ = flux_variability_analysis(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
@@ -229,6 +251,7 @@ def run_complexes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
             promiscuous_off=True,
             complexes_off=False
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
 
     print(f"  Biomass: {biomass:.4f}")
     print(f"  Reactions analyzed: {len(fva_df)}")
@@ -237,27 +260,30 @@ def run_complexes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
 
 
 def run_promiscuous_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
-                       use_parallel=False, n_workers=None):
+                       use_parallel=False, n_workers=None, method='dask', chunk_size=None):
     """Level 3c: Single enzyme + promiscuous enzymes."""
     print("\n=== Level 3c: + Promiscuous Enzymes ===")
     print("  (promiscuous_off=False, multi_enzyme_off=True, isoenzymes_off=True, complexes_off=True)")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
-        fva_df, biomass, _ = flux_variability_analysis_parallel(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis_parallel(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             output_file=None,
             enzyme_upper_bound=enzyme_upper_bound,
             n_workers=n_workers,
+            method=method,
+            chunk_size=chunk_size,
             multi_enzyme_off=True,
             isoenzymes_off=True,
             promiscuous_off=False,
             complexes_off=True
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
     else:
-        fva_df, biomass, _ = flux_variability_analysis(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
@@ -267,6 +293,7 @@ def run_promiscuous_fva(model, processed_df, biomass_reaction, enzyme_upper_boun
             promiscuous_off=False,
             complexes_off=True
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
 
     print(f"  Biomass: {biomass:.4f}")
     print(f"  Reactions analyzed: {len(fva_df)}")
@@ -275,28 +302,32 @@ def run_promiscuous_fva(model, processed_df, biomass_reaction, enzyme_upper_boun
 
 
 def run_all_constraints_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
-                           use_parallel=False, n_workers=None):
+                           use_parallel=False, n_workers=None, method='dask', chunk_size=None):
     """Level 4: All constraints (default kinGEMs)."""
     print("\n=== Level 4: All Constraints ===")
     print("  (all constraint types enabled)")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
-        fva_df, biomass, _ = flux_variability_analysis_parallel(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis_parallel(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             output_file=None,
             enzyme_upper_bound=enzyme_upper_bound,
-            n_workers=n_workers
+            n_workers=n_workers,
+            method=method,
+            chunk_size=chunk_size
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
     else:
-        fva_df, biomass, _ = flux_variability_analysis(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis(
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             enzyme_upper_bound=enzyme_upper_bound
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
 
     print(f"  Biomass: {biomass:.4f}")
     print(f"  Reactions analyzed: {len(fva_df)}")
@@ -305,132 +336,37 @@ def run_all_constraints_fva(model, processed_df, biomass_reaction, enzyme_upper_
 
 
 def run_tuned_fva(model, tuned_df, biomass_reaction, enzyme_upper_bound,
-                 use_parallel=False, n_workers=None):
+                 use_parallel=False, n_workers=None, method='dask', chunk_size=None):
     """Level 5: Post-tuned kinGEMs (after simulated annealing)."""
     print("\n=== Level 5: Post-Tuned (Simulated Annealing) ===")
     print("  (all constraints with tuned kcat values)")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
-        fva_df, biomass, _ = flux_variability_analysis_parallel(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis_parallel(
             model=model,
             processed_df=tuned_df,
             biomass_reaction=biomass_reaction,
             output_file=None,
             enzyme_upper_bound=enzyme_upper_bound,
-            n_workers=n_workers
+            n_workers=n_workers,
+            method=method,
+            chunk_size=chunk_size
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
     else:
-        fva_df, biomass, _ = flux_variability_analysis(
+        fva_df, processed_df_result, df_FBA = flux_variability_analysis(
             model=model,
             processed_df=tuned_df,
             biomass_reaction=biomass_reaction,
             enzyme_upper_bound=enzyme_upper_bound
         )
+        biomass = fva_df['Solution Biomass'].iloc[0]
 
     print(f"  Biomass: {biomass:.4f}")
     print(f"  Reactions analyzed: {len(fva_df)}")
 
     return fva_df, biomass
-
-
-def plot_fva_ablation(fva_results_dict, biomass_dict, output_file):
-    """Create cumulative FVI distribution plot for all levels."""
-    print("\n=== Generating FVA Ablation Plot ===")
-
-    fig, ax = plt.subplots(figsize=(12, 8))
-
-    # Define colors for each level
-    colors = {
-        'Level 1: Baseline GEM': '#1f77b4',
-        'Level 2: Single Enzyme': '#ff7f0e',
-        'Level 3a: + Isoenzymes': '#2ca02c',
-        'Level 3b: + Complexes': '#d62728',
-        'Level 3c: + Promiscuous': '#9467bd',
-        'Level 4: All Constraints': '#8c564b',
-        'Level 5: Post-Tuned': '#e377c2'
-    }
-
-    # Plot each level
-    for label, fva_df in fva_results_dict.items():
-        fvi = calculate_fvi(fva_df)
-        fvi_sorted = np.sort(fvi)
-        cumulative = np.arange(1, len(fvi_sorted) + 1) / len(fvi_sorted)
-
-        ax.plot(fvi_sorted, cumulative, label=label,
-                color=colors.get(label, None), linewidth=2)
-
-    # Add biomass reference lines
-    biomass_y = 0.9  # Position for biomass reference
-    for label, biomass in biomass_dict.items():
-        color = colors.get(label, 'gray')
-        ax.axhline(y=biomass_y, color=color, linestyle='--', alpha=0.3, linewidth=1)
-
-    # Create second y-axis for biomass
-    ax2 = ax.twinx()
-    ax2.set_ylabel('Biomass (1/hr)', fontsize=12)
-    ax2.set_ylim(0, 1.0)
-
-    # Add biomass values as text
-    y_pos = 0.95
-    for label, biomass in biomass_dict.items():
-        short_label = label.split(':')[0]  # Just "Level X"
-        ax2.text(1.01, y_pos, f"{short_label}: {biomass:.3f}",
-                transform=ax2.transAxes, fontsize=9,
-                color=colors.get(label, 'gray'))
-        y_pos -= 0.04
-
-    # Format plot
-    ax.set_xscale('log')
-    ax.set_xlabel('Flux Variability Range (mmol/gDCW/hr)', fontsize=12)
-    ax.set_ylabel('Cumulative Probability', fontsize=12)
-    ax.set_title('FVA Ablation Study: Impact of kinGEMs Constraints', fontsize=14, fontweight='bold')
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc='lower right', fontsize=10, framealpha=0.9)
-    ax.set_ylim(0, 1.0)
-    ax.set_xlim(1e-6, 1e3)
-
-    plt.tight_layout()
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"  Saved plot to: {output_file}")
-    plt.close()
-
-
-def generate_summary_statistics(fva_results_dict, biomass_dict, output_file):
-    """Generate summary statistics table for all levels."""
-    print("\n=== Generating Summary Statistics ===")
-
-    summary_data = []
-
-    for label, fva_df in fva_results_dict.items():
-        fvi = calculate_fvi(fva_df)
-        biomass = biomass_dict[label]
-
-        summary_data.append({
-            'Level': label,
-            'Biomass (1/hr)': biomass,
-            'N Reactions': len(fva_df),
-            'Mean FVI': fvi.mean(),
-            'Median FVI': fvi.median(),
-            'Std FVI': fvi.std(),
-            'Min FVI': fvi.min(),
-            'Max FVI': fvi.max(),
-            '% Zero Flux': (fvi == 0).sum() / len(fvi) * 100,
-            '% High Variability (FVI > 1)': (fvi > 1).sum() / len(fvi) * 100
-        })
-
-    summary_df = pd.DataFrame(summary_data)
-    summary_df.to_csv(output_file, index=False)
-    print(f"  Saved summary to: {output_file}")
-
-    # Print to console
-    print("\n" + "="*80)
-    print("Summary Statistics")
-    print("="*80)
-    print(summary_df.to_string(index=False))
-    print("="*80)
-
-    return summary_df
 
 
 def main():
@@ -454,6 +390,13 @@ def main():
     organism = config.get('organism', 'Unknown')
     enzyme_upper_bound = config.get('enzyme_upper_bound', 0.15)
 
+    # Get FVA configuration from config file, with command-line overrides
+    fva_config = config.get('fva', {})
+    use_parallel = args.parallel or fva_config.get('parallel', False)
+    n_workers = args.workers or fva_config.get('workers', None)
+    fva_method = fva_config.get('method', 'dask')
+    chunk_size = fva_config.get('chunk_size', None)
+
     # Generate run ID
     run_id = f"{model_name}_FVA_ablation_{datetime.today().strftime('%Y%m%d')}_{random.randint(1000, 9999)}"
 
@@ -476,9 +419,11 @@ def main():
     print(f"Run ID: {run_id}")
     print(f"Organism: {organism}")
     print(f"Enzyme upper bound: {enzyme_upper_bound}")
-    print(f"Parallel FVA: {args.parallel}")
-    if args.parallel:
-        print(f"Workers: {args.workers or 'auto'}")
+    print(f"Parallel FVA: {use_parallel}")
+    if use_parallel:
+        print(f"Workers: {n_workers or 'auto'}")
+        print(f"Method: {fva_method}")
+        print(f"Chunk size: {chunk_size or 'auto'}")
     print(f"Results directory: {results_dir}")
     print("="*80)
 
@@ -523,7 +468,7 @@ def main():
     # ===================================================================
     fva_df, biomass = run_single_enzyme_fva(
         model, processed_df, biomass_reaction, enzyme_upper_bound,
-        args.parallel, args.workers
+        use_parallel, n_workers, fva_method, chunk_size
     )
     fva_results['Level 2: Single Enzyme'] = fva_df
     biomass_values['Level 2: Single Enzyme'] = biomass
@@ -534,7 +479,7 @@ def main():
     # ===================================================================
     fva_df, biomass = run_isoenzymes_fva(
         model, processed_df, biomass_reaction, enzyme_upper_bound,
-        args.parallel, args.workers
+        use_parallel, n_workers, fva_method, chunk_size
     )
     fva_results['Level 3a: + Isoenzymes'] = fva_df
     biomass_values['Level 3a: + Isoenzymes'] = biomass
@@ -545,7 +490,7 @@ def main():
     # ===================================================================
     fva_df, biomass = run_complexes_fva(
         model, processed_df, biomass_reaction, enzyme_upper_bound,
-        args.parallel, args.workers
+        use_parallel, n_workers, fva_method, chunk_size
     )
     fva_results['Level 3b: + Complexes'] = fva_df
     biomass_values['Level 3b: + Complexes'] = biomass
@@ -556,7 +501,7 @@ def main():
     # ===================================================================
     fva_df, biomass = run_promiscuous_fva(
         model, processed_df, biomass_reaction, enzyme_upper_bound,
-        args.parallel, args.workers
+        use_parallel, n_workers, fva_method, chunk_size
     )
     fva_results['Level 3c: + Promiscuous'] = fva_df
     biomass_values['Level 3c: + Promiscuous'] = biomass
@@ -567,7 +512,7 @@ def main():
     # ===================================================================
     fva_df, biomass = run_all_constraints_fva(
         model, processed_df, biomass_reaction, enzyme_upper_bound,
-        args.parallel, args.workers
+        use_parallel, n_workers, fva_method, chunk_size
     )
     fva_results['Level 4: All Constraints'] = fva_df
     biomass_values['Level 4: All Constraints'] = biomass
@@ -625,20 +570,21 @@ def main():
     if tuned_df is not None:
         fva_df, biomass = run_tuned_fva(
             model, tuned_df, biomass_reaction, enzyme_upper_bound,
-            args.parallel, args.workers
+            use_parallel, n_workers, fva_method, chunk_size
         )
         fva_results['Level 5: Post-Tuned'] = fva_df
         biomass_values['Level 5: Post-Tuned'] = biomass
         fva_df.to_csv(os.path.join(results_dir, 'level5_post_tuned.csv'), index=False)
 
     # ===================================================================
-    # Generate Plots and Summary
+    # Generate Plots and Summary using universal plotting functions
     # ===================================================================
-    plot_file = os.path.join(results_dir, 'fva_ablation_cumulative.png')
-    plot_fva_ablation(fva_results, biomass_values, plot_file)
-
-    summary_file = os.path.join(results_dir, 'ablation_summary.csv')
-    generate_summary_statistics(fva_results, biomass_values, summary_file)
+    
+    # Create comprehensive dashboard with all plots and statistics
+    create_fva_ablation_dashboard(
+        fva_results, biomass_values, model_name, results_dir, 
+        prefix="fva_ablation", show=False
+    )
 
     # ===================================================================
     # Final Summary
@@ -651,14 +597,18 @@ def main():
     print("\nGenerated files:")
     print("  - level1_baseline.csv")
     print("  - level2_single_enzyme.csv")
+    print("  - level1_baseline.csv")
+    print("  - level2_single_enzyme.csv")
     print("  - level3a_isoenzymes.csv")
     print("  - level3b_complexes.csv")
     print("  - level3c_promiscuous.csv")
     print("  - level4_all_constraints.csv")
     if tuned_df is not None:
         print("  - level5_post_tuned.csv")
-    print("  - fva_ablation_cumulative.png")
-    print("  - ablation_summary.csv")
+    print("  - fva_ablation_cumulative.png (enhanced with biomass subplot)")
+    print("  - fva_ablation_boxplot.png (distribution analysis)")
+    print("  - fva_ablation_biomass_progression.png (biomass vs constraints)")
+    print("  - fva_ablation_summary.csv (updated with corrected FVi terminology)")
     print("="*80)
 
 

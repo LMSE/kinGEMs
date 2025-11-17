@@ -808,3 +808,571 @@ def plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats, output
     
     if output_dir:
         plt.savefig(os.path.join(output_dir, f"{prefix}kcat_scatter.png"), dpi=300, bbox_inches='tight')
+
+def calculate_flux_metrics(fva_df):
+    """Calculate both Flux Variability (FVi) and Flux Variability Range (FVR).
+
+    FVi = (max - min) / (max + min + ε) - Relative variability (0-1 scale) for reaction i
+    FVR = |max - min| - Absolute flux range
+
+    Parameters
+    ----------
+    fva_df : pandas.DataFrame
+        DataFrame with FVA results containing 'Min Solutions' and 'Max Solutions' columns
+
+    Returns
+    -------
+    tuple
+        (fvi, fvr) as pandas Series
+    """
+    max_flux = fva_df['Max Solutions']
+    min_flux = fva_df['Min Solutions']
+
+    # Calculate FVR (Flux Variability Range) - absolute difference
+    fvr = (max_flux - min_flux).abs()
+
+    # Calculate FVi (Flux Variability for reaction i) - normalized relative variability
+    fvi = (max_flux - min_flux) / (max_flux + min_flux + 1e-10)
+    fvi = fvi.replace([np.inf, -np.inf], 0).fillna(0)
+
+    return fvi, fvr
+
+
+def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name, 
+                                output_path=None, figsize=(12, 8), show=False,
+                                legend_position='upper left', enhanced=True):
+    """
+    Create cumulative FVi distribution plot for FVA ablation study.
+
+    Parameters
+    ----------
+    fva_results_dict : dict
+        Dictionary with level labels as keys and FVA DataFrames as values
+    biomass_dict : dict
+        Dictionary with level labels as keys and biomass values as values
+    model_name : str
+        Name of the model for plot title
+    output_path : str, optional
+        Path to save the figure
+    figsize : tuple, optional
+        Figure size (width, height)
+    show : bool, optional
+        Whether to display the plot
+    legend_position : str, optional
+        Position for the legend ('upper left', 'lower right', etc.)
+    enhanced : bool, optional
+        Whether to create enhanced version with bottom subplot
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The plot figure
+    """
+    set_plotting_style()
+
+    # Define colors for each level
+    colors = {
+        'Level 1: Baseline GEM': '#1f77b4',
+        'Level 2: Single Enzyme': '#ff7f0e',
+        'Level 3a: + Isoenzymes': '#2ca02c',
+        'Level 3b: + Complexes': '#d62728',
+        'Level 3c: + Promiscuous': '#9467bd',
+        'Level 4: All Constraints': '#8c564b',
+        'Level 5: Post-Tuned': '#e377c2'
+    }
+
+    if enhanced:
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, height_ratios=[3, 1])
+    else:
+        fig, ax1 = plt.subplots(figsize=figsize)
+
+    # Main plot: Cumulative distribution of FVi
+    all_fvi_values = []
+    fvi_stats = {}
+    
+    for label, fva_df in fva_results_dict.items():
+        fvi, fvr = calculate_flux_metrics(fva_df)
+        # Filter out zero values for log plotting
+        fvi_nonzero = fvi[fvi > 1e-15]
+        if len(fvi_nonzero) == 0:
+            fvi_nonzero = np.array([1e-15])
+
+        all_fvi_values.extend(fvi_nonzero)
+        fvi_sorted = np.sort(fvi_nonzero)
+        cumulative = np.arange(1, len(fvi_sorted) + 1) / len(fvi_sorted)
+
+        ax1.plot(fvi_sorted, cumulative, label=label,
+                color=colors.get(label, None), linewidth=2.5)
+        
+        # Store stats for bottom plot
+        if enhanced:
+            fvi_stats[label] = {
+                'mean': fvi.mean(),
+                'median': fvi.median(),
+                'biomass': biomass_dict[label]
+            }
+
+    # Add horizontal line at cumulative probability 0.5
+    ax1.axhline(0.5, color='gray', linestyle='--', linewidth=1.5, alpha=0.7)
+
+    # Plot biomass lines on bottom subplot if enhanced mode
+    if enhanced and fvi_stats:
+        # Get the FVi range for x-axis reference
+        all_fvi_min = min(all_fvi_values) if all_fvi_values else 1e-15
+        all_fvi_max = max(all_fvi_values) if all_fvi_values else 1e3
+        
+        for label, stats in fvi_stats.items():
+            color = colors.get(label, '#000000')
+            biomass_value = stats['biomass']
+            ax2.plot([all_fvi_min, all_fvi_max], 
+                    [biomass_value, biomass_value],
+                    color=color, linestyle='--', linewidth=2, alpha=0.8)
+        
+        # Format bottom plot
+        ax2.set_xscale('log')
+        ax2.set_xlim(ax1.get_xlim())  # Match x-axis limits with top plot
+        ax2.set_ylabel('Biomass (1/hr)', fontsize=13)
+        ax2.tick_params(axis='both', labelsize=12)
+        ax2.grid(True, alpha=0.3)
+
+    # Format main plot
+    ax1.set_xscale('log')
+    ax1.set_xlabel('Flux Variability (FVi)', fontsize=13)
+    ax1.set_ylabel('Cumulative Probability', fontsize=13)
+
+    # Set title
+    title = f'{model_name}: Cumulative Flux Variability Distribution'
+    ax1.set_title(title, fontsize=16, fontweight='bold')
+
+    # Configure ticks and grid
+    ax1.tick_params(axis='both', labelsize=12)
+    ax1.grid(True, alpha=0.3)
+
+    # Add legend
+    ax1.legend(loc=legend_position, fontsize=12, framealpha=0.9)
+    
+    plt.tight_layout()
+
+    # Save if output path provided
+    if output_path:
+        ensure_dir_exists(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+
+    # Show if requested
+    if show:
+        plt.show()
+
+    return fig
+
+
+def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None, 
+                             figsize=(12, 8), show=False):
+    """
+    Create box plot of FVi distributions for FVA ablation study.
+
+    Parameters
+    ----------
+    fva_results_dict : dict
+        Dictionary with level labels as keys and FVA DataFrames as values
+    model_name : str
+        Name of the model for plot title
+    output_path : str, optional
+        Path to save the figure
+    figsize : tuple, optional
+        Figure size (width, height)
+    show : bool, optional
+        Whether to display the plot
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The plot figure
+    """
+    set_plotting_style()
+
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    fvi_data = []
+    labels = []
+    colors_list = []
+    
+    colors = {
+        'Level 1: Baseline GEM': '#1f77b4',
+        'Level 2: Single Enzyme': '#ff7f0e',
+        'Level 3a: + Isoenzymes': '#2ca02c',
+        'Level 3b: + Complexes': '#d62728',
+        'Level 3c: + Promiscuous': '#9467bd',
+        'Level 4: All Constraints': '#8c564b',
+        'Level 5: Post-Tuned': '#e377c2'
+    }
+    
+    for label, fva_df in fva_results_dict.items():
+        fvi, fvr = calculate_flux_metrics(fva_df)
+        # Use log scale for better visualization, filter zeros
+        fvi_nonzero = fvi[fvi > 1e-15]
+        if len(fvi_nonzero) > 0:
+            fvi_data.append(np.log10(fvi_nonzero))
+            labels.append(label.replace('Level ', 'L').replace(': ', '\n'))
+            colors_list.append(colors[label])
+    
+    bp = ax.boxplot(fvi_data, labels=labels, patch_artist=True, showfliers=False)
+    
+    for patch, color in zip(bp['boxes'], colors_list):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
+    
+    ax.set_ylabel('log₁₀(FVi)', fontsize=12)
+    ax.set_title(f'{model_name}: Distribution of Flux Variability (FVi) by Constraint Level', fontsize=14)
+    ax.grid(True, alpha=0.3, axis='y')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+
+    # Save if output path provided
+    if output_path:
+        ensure_dir_exists(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+
+    # Show if requested
+    if show:
+        plt.show()
+
+    return fig
+
+
+def plot_biomass_progression(fva_results_dict, biomass_dict, model_name,
+                            output_path=None, figsize=(10, 6), show=False):
+    """
+    Create biomass progression plot for FVA ablation study.
+
+    Parameters
+    ----------
+    fva_results_dict : dict
+        Dictionary with level labels as keys and FVA DataFrames as values
+    biomass_dict : dict
+        Dictionary with level labels as keys and biomass values as values
+    model_name : str
+        Name of the model for plot title
+    output_path : str, optional
+        Path to save the figure
+    figsize : tuple, optional
+        Figure size (width, height)
+    show : bool, optional
+        Whether to display the plot
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The plot figure
+    """
+    set_plotting_style()
+
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Extract level numbers for x-axis
+    level_nums = []
+    biomass_vals = []
+    level_labels = []
+    
+    for label in fva_results_dict.keys():
+        if 'Level 1' in label:
+            level_nums.append(1)
+        elif 'Level 2' in label:
+            level_nums.append(2)
+        elif 'Level 3a' in label:
+            level_nums.append(3.1)
+        elif 'Level 3b' in label:
+            level_nums.append(3.2)
+        elif 'Level 3c' in label:
+            level_nums.append(3.3)
+        elif 'Level 4' in label:
+            level_nums.append(4)
+        elif 'Level 5' in label:
+            level_nums.append(5)
+        
+        biomass_vals.append(biomass_dict[label])
+        level_labels.append(label)
+    
+    # Sort by level number
+    sorted_data = sorted(zip(level_nums, biomass_vals, level_labels))
+    level_nums, biomass_vals, level_labels = zip(*sorted_data)
+    
+    ax.plot(level_nums, biomass_vals, 'o-', linewidth=2, markersize=8, color='steelblue')
+    
+    # Annotate points
+    for x, y, label in zip(level_nums, biomass_vals, level_labels):
+        ax.annotate(f'{y:.4f}', (x, y), textcoords="offset points", 
+                   xytext=(0,10), ha='center', fontsize=10)
+    
+    ax.set_xlabel('Constraint Level', fontsize=12)
+    ax.set_ylabel('Biomass (1/hr)', fontsize=12)
+    ax.set_title(f'{model_name}: Biomass Production vs Constraint Complexity', fontsize=14)
+    ax.grid(True, alpha=0.3)
+    
+    # Custom x-axis labels
+    ax.set_xticks(level_nums)
+    ax.set_xticklabels([label.replace('Level ', 'L').replace(': ', '\n') for label in level_labels], 
+                      fontsize=10, rotation=45, ha='right')
+    
+    plt.tight_layout()
+
+    # Save if output path provided
+    if output_path:
+        ensure_dir_exists(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+
+    # Show if requested
+    if show:
+        plt.show()
+
+    return fig
+
+
+def generate_fva_ablation_summary_statistics(fva_results_dict, biomass_dict, output_path=None):
+    """
+    Generate summary statistics table for FVA ablation study.
+
+    Parameters
+    ----------
+    fva_results_dict : dict
+        Dictionary with level labels as keys and FVA DataFrames as values
+    biomass_dict : dict
+        Dictionary with level labels as keys and biomass values as values
+    output_path : str, optional
+        Path to save the summary CSV file
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with summary statistics
+    """
+    summary_data = []
+
+    for label, fva_df in fva_results_dict.items():
+        fvi, fvr = calculate_flux_metrics(fva_df)
+        biomass = biomass_dict[label]
+
+        # Flag reactions with high flux variability range (potential issues)
+        high_range_reactions = fvr >= 1000
+        
+        # Additional metrics
+        zero_flux_reactions = (fvi == 0).sum()
+        high_var_reactions = (fvi > 1).sum()
+        
+        summary_data.append({
+            'Level': label,
+            'Biomass (1/hr)': biomass,
+            'N Reactions': len(fva_df),
+            'Mean FVi': fvi.mean(),
+            'Median FVi': fvi.median(),
+            'Std FVi': fvi.std(),
+            'Min FVi': fvi.min(),
+            'Max FVi': fvi.max(),
+            'Q25 FVi': fvi.quantile(0.25),
+            'Q75 FVi': fvi.quantile(0.75),
+            '% Zero Flux': zero_flux_reactions / len(fvi) * 100,
+            '% High Variability (FVi > 1)': high_var_reactions / len(fvi) * 100,
+            'Mean FVR': fvr.mean(),
+            'Median FVR': fvr.median(),
+            'Max FVR': fvr.max(),
+            '% High Range (FVR ≥ 1000)': high_range_reactions.sum() / len(fvr) * 100,
+            'N High Range Reactions': high_range_reactions.sum(),
+            'N Zero Flux': zero_flux_reactions,
+            'N High Variability': high_var_reactions
+        })
+
+    summary_df = pd.DataFrame(summary_data)
+    
+    if output_path:
+        ensure_dir_exists(os.path.dirname(output_path))
+        summary_df.to_csv(output_path, index=False)
+
+    return summary_df
+
+
+def create_fva_ablation_dashboard(fva_results_dict, biomass_dict, model_name,
+                                 output_dir, prefix="fva_ablation", show=False):
+    """
+    Create a complete FVA ablation analysis dashboard with multiple plots.
+
+    Parameters
+    ----------
+    fva_results_dict : dict
+        Dictionary with level labels as keys and FVA DataFrames as values
+    biomass_dict : dict
+        Dictionary with level labels as keys and biomass values as values
+    model_name : str
+        Name of the model for plot titles
+    output_dir : str
+        Directory to save output files
+    prefix : str, optional
+        Prefix for output filenames
+    show : bool, optional
+        Whether to display the plots
+
+    Returns
+    -------
+    dict
+        Dictionary of generated plot figures and summary statistics
+    """
+    ensure_dir_exists(output_dir)
+    
+    results = {}
+
+    # 1. Enhanced cumulative plot
+    cumulative_fig = plot_fva_ablation_cumulative(
+        fva_results_dict, biomass_dict, model_name,
+        output_path=os.path.join(output_dir, f'{prefix}_cumulative.png'),
+        enhanced=True, show=show
+    )
+    results['cumulative_plot'] = cumulative_fig
+
+    # 2. Box plot of FVi distributions
+    boxplot_fig = plot_fva_ablation_boxplot(
+        fva_results_dict, model_name,
+        output_path=os.path.join(output_dir, f'{prefix}_boxplot.png'),
+        show=show
+    )
+    results['boxplot'] = boxplot_fig
+
+    # 3. Biomass progression plot
+    biomass_fig = plot_biomass_progression(
+        fva_results_dict, biomass_dict, model_name,
+        output_path=os.path.join(output_dir, f'{prefix}_biomass_progression.png'),
+        show=show
+    )
+    results['biomass_plot'] = biomass_fig
+
+    # 4. Summary statistics
+    summary_df = generate_fva_ablation_summary_statistics(
+        fva_results_dict, biomass_dict,
+        output_path=os.path.join(output_dir, f'{prefix}_summary.csv')
+    )
+    results['summary_statistics'] = summary_df
+
+    # Print summary
+    print("\n=== FVA Ablation Dashboard Generated ===")
+    print(f"Model: {model_name}")
+    print(f"Output directory: {output_dir}")
+    print("Generated files:")
+    print(f"  - {prefix}_cumulative.png (enhanced plot)")
+    print(f"  - {prefix}_boxplot.png (distribution analysis)")
+    print(f"  - {prefix}_biomass_progression.png (biomass vs constraints)")
+    print(f"  - {prefix}_summary.csv (summary statistics)")
+
+    return results
+
+def plot_cumulative_fvi_distribution(fva_dataframes, labels, output_path=None, 
+                                    figsize=(12, 8), show=False, title=None,
+                                    legend_position='upper left'):
+    """
+    Plot cumulative distributions of Flux Variability (FVi) for multiple FVA result sets.
+
+    This creates the standard FVi cumulative distribution plot used throughout kinGEMs,
+    with proper styling, horizontal reference line at 0.5, and biomass information.
+
+    Parameters
+    ----------
+    fva_dataframes : list of pandas.DataFrame
+        List of FVA result dataframes, each containing 'Min Solutions', 'Max Solutions',
+        and optionally 'Solution Biomass' columns
+    labels : list of str
+        Labels corresponding to each dataframe
+    output_path : str, optional
+        Path to save the figure
+    figsize : tuple, optional
+        Figure size (width, height)
+    show : bool, optional
+        Whether to display the plot
+    title : str, optional
+        Custom title for the plot
+    legend_position : str, optional
+        Position for the legend
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The plot figure
+    """
+    set_plotting_style()
+
+    fig, ax1 = plt.subplots(figsize=figsize, dpi=300)
+    ax2 = ax1.twinx()
+
+    # Define colors (cycling through if more datasets than colors)
+    colors = plt.cm.tab10.colors
+    
+    fvi_at_0_5 = []
+
+    for i, (df, label) in enumerate(zip(fva_dataframes, labels)):
+        # Calculate FVi using standard method
+        fvi, _ = calculate_flux_metrics(df)
+        
+        # Filter out invalid values
+        fvi_values = fvi.values
+        fvi_values = fvi_values[~np.isnan(fvi_values)]
+        fvi_values = fvi_values[fvi_values >= 1e-15]  # Avoid log(0)
+
+        if len(fvi_values) == 0:
+            print(f"Warning: No valid FVi values for {label}")
+            continue
+
+        # Sort and create cumulative distribution
+        sorted_fvi = np.sort(fvi_values)
+        cumulative = np.arange(1, len(sorted_fvi) + 1) / len(sorted_fvi)
+
+        # Plot cumulative distribution
+        color = colors[i % len(colors)]
+        ax1.plot(sorted_fvi, cumulative, label=label, linewidth=2.5, color=color)
+
+        # Get biomass value and plot reference line
+        if 'Solution Biomass' in df.columns:
+            biomass_value = df['Solution Biomass'].iloc[0]
+            ax2.plot([fvi_values.min(), fvi_values.max()],
+                    [biomass_value, biomass_value],
+                    linestyle='--', color=color, linewidth=2, alpha=0.6)
+
+        # Calculate FVi at 50th percentile
+        fvi_50 = np.interp(0.5, cumulative, sorted_fvi) if len(sorted_fvi) > 0 else np.nan
+        fvi_at_0_5.append((label, fvi_50))
+
+    # Add horizontal reference line at cumulative probability 0.5
+    ax1.axhline(0.5, color='gray', linestyle='--', linewidth=1.5, alpha=0.7)
+
+    # Format main plot
+    ax1.set_xscale('log')
+    ax1.set_xlim(1e-6, 1e3)
+    ax1.set_ylim(0, 1)
+    ax1.set_xlabel('Flux Variability (FVi)', fontsize=14)
+    ax1.set_ylabel('Cumulative Probability', fontsize=14)
+    ax2.set_ylabel('Biomass (1/hr)', fontsize=14)
+
+    # Set title
+    if title is None:
+        title = 'Cumulative Flux Variability Distribution'
+    ax1.set_title(title, fontsize=16, fontweight='bold')
+
+    # Configure ticks and grid
+    ax1.tick_params(axis='both', labelsize=12)
+    ax2.tick_params(axis='y', labelsize=12)
+    ax1.grid(True, alpha=0.3)
+
+    # Add legend
+    ax1.legend(loc=legend_position, fontsize=12, framealpha=0.9)
+    
+    plt.tight_layout()
+
+    # Print summary statistics
+    print("\nFVi at cumulative probability = 0.5:")
+    for label, val in fvi_at_0_5:
+        print(f"  {label}: {val:.4f}")
+
+    # Save if output path provided
+    if output_path:
+        ensure_dir_exists(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+
+    # Show if requested
+    if show:
+        plt.show()
+
+    return fig

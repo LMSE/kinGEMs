@@ -31,7 +31,7 @@ source venv/bin/activate
 mkdir -p logs
 
 # Configuration file
-CONFIG_FILE=${1:-configs/iML1515_GEM.json}
+CONFIG_FILE=${1:-configs/iML1515_GEM_fva_ablation.json}
 
 echo ""
 echo "Configuration: $CONFIG_FILE"
