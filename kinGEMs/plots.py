@@ -18,12 +18,12 @@ from .config import ensure_dir_exists
 def set_plotting_style(style="whitegrid"):
     """
     Set a consistent style for all plots.
-    
+
     Parameters
     ----------
     style : str, optional
         The seaborn style to use
-        
+
     Returns
     -------
     None
@@ -36,11 +36,11 @@ def set_plotting_style(style="whitegrid"):
     plt.rcParams['ytick.labelsize'] = 12
     plt.rcParams['legend.fontsize'] = 12
 
-def plot_flux_distribution(df_FBA, n_reactions=20, output_path=None, figsize=(12, 8), 
+def plot_flux_distribution(df_FBA, n_reactions=20, output_path=None, figsize=(12, 8),
                           show=False, absolute=True, exclude_exchanges=True):
     """
     Plot the flux distribution for the top reactions.
-    
+
     Parameters
     ----------
     df_FBA : pandas.DataFrame
@@ -57,7 +57,7 @@ def plot_flux_distribution(df_FBA, n_reactions=20, output_path=None, figsize=(12
         Whether to sort by absolute flux values
     exclude_exchanges : bool, optional
         Whether to exclude exchange reactions
-        
+
     Returns
     -------
     matplotlib.figure.Figure
@@ -65,60 +65,60 @@ def plot_flux_distribution(df_FBA, n_reactions=20, output_path=None, figsize=(12
     """
     # Set the plotting style
     set_plotting_style()
-    
+
     # Filter for reaction fluxes
     df_flux = df_FBA[df_FBA['Variable'] == 'reaction'].copy()
-    
+
     # Exclude exchange reactions if requested
     if exclude_exchanges:
         df_flux = df_flux[~df_flux['Index'].str.startswith('EX_')]
-    
+
     # Sort by absolute flux value if requested
     if absolute:
         df_flux['AbsValue'] = df_flux['Value'].abs()
         df_flux = df_flux.sort_values('AbsValue', ascending=False)
     else:
         df_flux = df_flux.sort_values('Value', ascending=False)
-    
+
     # Take top N reactions
     df_flux = df_flux.head(n_reactions)
-    
+
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Create horizontal bar plot
     colors = ['#1f77b4' if val >= 0 else '#d62728' for val in df_flux['Value']]
     ax.barh(df_flux['Index'], df_flux['Value'], color=colors)
-    
+
     # Add labels and title
     ax.set_xlabel('Flux (mmol/gDW/h)')
     ax.set_title('Top Fluxes in Model')
-    
+
     # Add zero line
     ax.axvline(x=0, color='black', linestyle='-', alpha=0.3)
-    
+
     # Add grid
     ax.grid(True, axis='x', alpha=0.3)
-    
+
     # Adjust layout
     plt.tight_layout()
-    
+
     # Save if output path provided
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
 
-def plot_enzyme_usage(df_enzyme, n_enzymes=20, output_path=None, figsize=(12, 8), 
+def plot_enzyme_usage(df_enzyme, n_enzymes=20, output_path=None, figsize=(12, 8),
                      show=False, by_weight=True):
     """
     Plot enzyme usage distribution for the top enzymes.
-    
+
     Parameters
     ----------
     df_enzyme : pandas.DataFrame
@@ -133,7 +133,7 @@ def plot_enzyme_usage(df_enzyme, n_enzymes=20, output_path=None, figsize=(12, 8)
         Whether to display the plot
     by_weight : bool, optional
         Whether to sort by enzyme weight (True) or concentration (False)
-        
+
     Returns
     -------
     matplotlib.figure.Figure
@@ -141,26 +141,26 @@ def plot_enzyme_usage(df_enzyme, n_enzymes=20, output_path=None, figsize=(12, 8)
     """
     # Set the plotting style
     set_plotting_style()
-    
+
     # Copy the dataframe to avoid modifying the original
     df = df_enzyme.copy()
-    
+
     # Determine the sort column based on by_weight flag
     sort_column = 'enzyme weight (g/gDCW)' if by_weight else 'enzyme_conc'
-    
+
     # Ensure the required columns exist
     if sort_column not in df.columns:
         raise ValueError(f"Required column '{sort_column}' not found in the dataframe")
-    
+
     # Sort the dataframe and take the top N enzymes
     df = df.sort_values(sort_column, ascending=False).head(n_enzymes)
-    
+
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Create horizontal bar plot
     ax.barh(df['gene_ID'], df[sort_column], color='#1f77b4')
-    
+
     # Add labels and title
     if by_weight:
         ax.set_xlabel('Enzyme Weight (g/gDCW)')
@@ -168,29 +168,29 @@ def plot_enzyme_usage(df_enzyme, n_enzymes=20, output_path=None, figsize=(12, 8)
     else:
         ax.set_xlabel('Enzyme Concentration (mmol/gDCW)')
         ax.set_title('Top Enzymes by Concentration')
-    
+
     # Add grid
     ax.grid(True, axis='x', alpha=0.3)
-    
+
     # Adjust layout
     plt.tight_layout()
-    
+
     # Save if output path provided
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
 
-def plot_kcat_distribution(kcat_df, output_path=None, figsize=(10, 6), show=False, 
+def plot_kcat_distribution(kcat_df, output_path=None, figsize=(10, 6), show=False,
                          log_scale=True):
     """
     Plot the distribution of kcat values.
-    
+
     Parameters
     ----------
     kcat_df : pandas.DataFrame
@@ -203,7 +203,7 @@ def plot_kcat_distribution(kcat_df, output_path=None, figsize=(10, 6), show=Fals
         Whether to display the plot
     log_scale : bool, optional
         Whether to use a log scale for the x-axis
-        
+
     Returns
     -------
     matplotlib.figure.Figure
@@ -211,41 +211,41 @@ def plot_kcat_distribution(kcat_df, output_path=None, figsize=(10, 6), show=Fals
     """
     # Set the plotting style
     set_plotting_style()
-    
+
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Create histogram
     sns.histplot(kcat_df['kcat (1/hr)'].dropna(), bins=30, kde=True, ax=ax)
-    
+
     # Set log scale if requested
     if log_scale:
         ax.set_xscale('log')
-    
+
     # Add labels and title
     ax.set_xlabel('kcat (1/hr)')
     ax.set_ylabel('Count')
     ax.set_title('Distribution of kcat Values')
-    
+
     # Adjust layout
     plt.tight_layout()
-    
+
     # Save if output path provided
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
 
-def plot_kcat_comparison(original_kcat_df, optimized_kcat_df, output_path=None, 
+def plot_kcat_comparison(original_kcat_df, optimized_kcat_df, output_path=None,
                         figsize=(12, 10), show=False):
     """
     Compare original and optimized kcat values.
-    
+
     Parameters
     ----------
     original_kcat_df : pandas.DataFrame
@@ -258,7 +258,7 @@ def plot_kcat_comparison(original_kcat_df, optimized_kcat_df, output_path=None,
         Figure size (width, height)
     show : bool, optional
         Whether to display the plot
-        
+
     Returns
     -------
     matplotlib.figure.Figure
@@ -266,59 +266,59 @@ def plot_kcat_comparison(original_kcat_df, optimized_kcat_df, output_path=None,
     """
     # Set the plotting style
     set_plotting_style()
-    
+
     # Prepare the data
     original = original_kcat_df['kcat (1/hr)'].dropna()
     optimized = optimized_kcat_df['kcat (1/hr)'].dropna()
-    
+
     # Create combined dataframe for seaborn
     combined_data = pd.DataFrame({
         'kcat (1/hr)': pd.concat([original, optimized]),
         'Type': ['Original kcats'] * len(original) + ['Optimized kcats'] * len(optimized),
     })
-    
+
     # Create figure with subplots
     fig, axes = plt.subplots(3, 1, figsize=figsize)
-    
+
     # 1. Boxplot comparison
     sns.boxplot(x='kcat (1/hr)', y='Type', data=combined_data, ax=axes[0])
     axes[0].set_xscale('log')
     axes[0].set_title('Comparison of kcat Distributions')
     axes[0].set_xlabel('kcat (1/hr), log scale')
     axes[0].set_ylabel('')
-    
+
     # 2. Histograms
     sns.histplot(original, bins=30, kde=True, ax=axes[1], color='orange', label='Original')
     axes[1].set_xscale('log')
     axes[1].set_title('Original kcat Distribution')
     axes[1].set_xlabel('kcat (1/hr), log scale')
     axes[1].set_ylabel('Count')
-    
+
     sns.histplot(optimized, bins=30, kde=True, ax=axes[2], color='blue', label='Optimized')
     axes[2].set_xscale('log')
     axes[2].set_title('Optimized kcat Distribution')
     axes[2].set_xlabel('kcat (1/hr), log scale')
     axes[2].set_ylabel('Count')
-    
+
     # Adjust layout
     plt.tight_layout()
-    
+
     # Save if output path provided
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
 
 def plot_fva_results(fva_results, n_reactions=20, output_path=None, figsize=(12, 8),
                     show=False, sort_by='range'):
     """
     Plot Flux Variability Analysis results.
-    
+
     Parameters
     ----------
     fva_results : pandas.DataFrame
@@ -333,7 +333,7 @@ def plot_fva_results(fva_results, n_reactions=20, output_path=None, figsize=(12,
         Whether to display the plot
     sort_by : str, optional
         How to sort the reactions ('range', 'min', 'max', 'abs_max')
-        
+
     Returns
     -------
     matplotlib.figure.Figure
@@ -341,12 +341,12 @@ def plot_fva_results(fva_results, n_reactions=20, output_path=None, figsize=(12,
     """
     # Set the plotting style
     set_plotting_style()
-    
+
     # Copy and prepare the data
     df = fva_results.copy()
     df['Flux Range'] = df['Max Solutions'] - df['Min Solutions']
     df['Abs Max'] = df['Max Solutions'].abs()
-    
+
     # Sort based on the specified criterion
     if sort_by == 'range':
         df = df.sort_values('Flux Range', ascending=False)
@@ -356,51 +356,51 @@ def plot_fva_results(fva_results, n_reactions=20, output_path=None, figsize=(12,
         df = df.sort_values('Max Solutions', ascending=False)
     elif sort_by == 'abs_max':
         df = df.sort_values('Abs Max', ascending=False)
-    
+
     # Take the top N reactions
     df = df.head(n_reactions)
-    
+
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Plot flux ranges as horizontal lines with points at min and max
     for i, (_, row) in enumerate(df.iterrows()):
-        ax.plot([row['Min Solutions'], row['Max Solutions']], [i, i], 'o-', 
+        ax.plot([row['Min Solutions'], row['Max Solutions']], [i, i], 'o-',
                color='#1f77b4', linewidth=2, markersize=6)
-    
+
     # Set y-axis ticks and labels
     ax.set_yticks(range(len(df)))
     ax.set_yticklabels(df['Reactions'])
-    
+
     # Add zero line
     ax.axvline(x=0, color='black', linestyle='-', alpha=0.3)
-    
+
     # Add labels and title
     ax.set_xlabel('Flux (mmol/gDW/h)')
     ax.set_title('Flux Variability Analysis Results')
-    
+
     # Add grid
     ax.grid(True, axis='x', alpha=0.3)
-    
+
     # Adjust layout
     plt.tight_layout()
-    
+
     # Save if output path provided
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
 
 def plot_reaction_control(control_df, n_reactions=20, output_path=None, figsize=(12, 8),
                          show=False):
     """
     Plot reaction control coefficients showing which enzymes most control reaction fluxes.
-    
+
     Parameters
     ----------
     control_df : pandas.DataFrame
@@ -413,7 +413,7 @@ def plot_reaction_control(control_df, n_reactions=20, output_path=None, figsize=
         Figure size (width, height)
     show : bool, optional
         Whether to display the plot
-        
+
     Returns
     -------
     matplotlib.figure.Figure
@@ -421,56 +421,56 @@ def plot_reaction_control(control_df, n_reactions=20, output_path=None, figsize=
     """
     # Set the plotting style
     set_plotting_style()
-    
+
     # Copy and prepare the data
     df = control_df.copy()
-    
+
     # Sort by absolute control coefficient
     df['Abs Control'] = df['Control Coefficient'].abs()
     df = df.sort_values('Abs Control', ascending=False).head(n_reactions)
-    
+
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Create horizontal bar plot
     bars = ax.barh(df['Pair'], df['Control Coefficient'])
-    
+
     # Color bars based on sign
     for i, bar in enumerate(bars):
         if df.iloc[i]['Control Coefficient'] < 0:
             bar.set_color('#d62728')  # Red for negative
         else:
             bar.set_color('#1f77b4')  # Blue for positive
-    
+
     # Add zero line
     ax.axvline(x=0, color='black', linestyle='-', alpha=0.3)
-    
+
     # Add labels and title
     ax.set_xlabel('Control Coefficient')
     ax.set_title('Enzyme Control over Reaction Fluxes')
-    
+
     # Add grid
     ax.grid(True, axis='x', alpha=0.3)
-    
+
     # Adjust layout
     plt.tight_layout()
-    
+
     # Save if output path provided
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
 
 def plot_correlation_heatmap(df, columns=None, output_path=None, figsize=(12, 10),
                             show=False, method='pearson'):
     """
     Plot a correlation heatmap for model parameters or results.
-    
+
     Parameters
     ----------
     df : pandas.DataFrame
@@ -485,7 +485,7 @@ def plot_correlation_heatmap(df, columns=None, output_path=None, figsize=(12, 10
         Whether to display the plot
     method : str, optional
         Correlation method ('pearson', 'spearman', or 'kendall')
-        
+
     Returns
     -------
     matplotlib.figure.Figure
@@ -493,7 +493,7 @@ def plot_correlation_heatmap(df, columns=None, output_path=None, figsize=(12, 10
     """
     # Set the plotting style
     set_plotting_style()
-    
+
     # Use specified columns or all numeric columns
     if columns is None:
         # Filter for numeric columns
@@ -501,41 +501,41 @@ def plot_correlation_heatmap(df, columns=None, output_path=None, figsize=(12, 10
         df_corr = df[numeric_cols]
     else:
         df_corr = df[columns]
-    
+
     # Calculate correlation matrix
     corr_matrix = df_corr.corr(method=method)
-    
+
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Create heatmap
     mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
     cmap = sns.diverging_palette(230, 20, as_cmap=True)
-    
+
     sns.heatmap(corr_matrix, mask=mask, cmap=cmap, vmax=1, vmin=-1, center=0,
                square=True, linewidths=.5, cbar_kws={"shrink": .5}, annot=True)
-    
+
     # Add title
     ax.set_title(f'{method.capitalize()} Correlation Heatmap')
-    
+
     # Adjust layout
     plt.tight_layout()
-    
+
     # Save if output path provided
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
 
 def create_summary_dashboard(results_dict, output_path=None, figsize=(18, 12), show=False):
     """
     Create a summary dashboard with multiple plots for model analysis.
-    
+
     Parameters
     ----------
     results_dict : dict
@@ -546,7 +546,7 @@ def create_summary_dashboard(results_dict, output_path=None, figsize=(18, 12), s
         Figure size (width, height)
     show : bool, optional
         Whether to display the plot
-        
+
     Returns
     -------
     matplotlib.figure.Figure
@@ -554,13 +554,13 @@ def create_summary_dashboard(results_dict, output_path=None, figsize=(18, 12), s
     """
     # Set the plotting style
     set_plotting_style()
-    
+
     # Create figure with subplots
     fig = plt.figure(figsize=figsize)
-    
+
     # Define grid layout
     gs = fig.add_gridspec(2, 3)
-    
+
     # 1. Flux distribution
     if 'fba_results' in results_dict:
         ax1 = fig.add_subplot(gs[0, 0])
@@ -571,7 +571,7 @@ def create_summary_dashboard(results_dict, output_path=None, figsize=(18, 12), s
         ax1.barh(df_flux['Index'], df_flux['Value'], color=colors)
         ax1.set_title('Top Fluxes')
         ax1.axvline(x=0, color='black', linestyle='-', alpha=0.3)
-    
+
     # 2. Enzyme usage
     if 'enzyme_data' in results_dict:
         ax2 = fig.add_subplot(gs[0, 1])
@@ -580,23 +580,23 @@ def create_summary_dashboard(results_dict, output_path=None, figsize=(18, 12), s
         df_enzyme = df_enzyme.sort_values(sort_col, ascending=False).head(10)
         ax2.barh(df_enzyme['gene_ID'], df_enzyme[sort_col], color='#1f77b4')
         ax2.set_title('Top Enzymes')
-    
+
     # 3. FVA results
     if 'fva_results' in results_dict:
         ax3 = fig.add_subplot(gs[0, 2])
         df_fva = results_dict['fva_results']
         df_fva['Flux Range'] = df_fva['Max Solutions'] - df_fva['Min Solutions']
         df_fva = df_fva.sort_values('Flux Range', ascending=False).head(10)
-        
+
         for i, (_, row) in enumerate(df_fva.iterrows()):
-            ax3.plot([row['Min Solutions'], row['Max Solutions']], [i, i], 'o-', 
+            ax3.plot([row['Min Solutions'], row['Max Solutions']], [i, i], 'o-',
                    color='#1f77b4', linewidth=2, markersize=6)
-        
+
         ax3.set_yticks(range(len(df_fva)))
         ax3.set_yticklabels(df_fva['Reactions'])
         ax3.axvline(x=0, color='black', linestyle='-', alpha=0.3)
         ax3.set_title('Flux Variability')
-    
+
     # 4. kcat distribution
     if 'kcat_data' in results_dict:
         ax4 = fig.add_subplot(gs[1, 0])
@@ -604,39 +604,39 @@ def create_summary_dashboard(results_dict, output_path=None, figsize=(18, 12), s
         sns.histplot(df_kcat['kcat (1/hr)'].dropna(), bins=20, kde=True, ax=ax4)
         ax4.set_xscale('log')
         ax4.set_title('kcat Distribution')
-    
+
     # 5. Simulated annealing progress
     if 'annealing_data' in results_dict:
         ax5 = fig.add_subplot(gs[1, 1:])
         annealing_data = results_dict['annealing_data']
         iterations = annealing_data['iterations']
         biomasses = annealing_data['biomasses']
-        ax5.plot(iterations, biomasses, marker='o', linestyle='-', color='#1f77b4', 
+        ax5.plot(iterations, biomasses, marker='o', linestyle='-', color='#1f77b4',
                markerfacecolor='white', markersize=6)
         ax5.set_title('Optimization Progress')
         ax5.set_xlabel('Iteration')
         ax5.set_ylabel('Biomass (1/hr)')
-    
+
     # Adjust layout
     fig.suptitle('Model Analysis Summary', fontsize=20)
     plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust for suptitle
-    
+
     # Save if output path provided
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
 
 
 def plot_annealing_progress(iterations, biomasses, output_path=None, show=False):
     """
     Plot the progress of simulated annealing optimization.
-    
+
     Parameters
     ----------
     iterations : list
@@ -647,7 +647,7 @@ def plot_annealing_progress(iterations, biomasses, output_path=None, show=False)
         Path to save the plot figure
     show : bool, optional
         Whether to display the plot
-        
+
     Returns
     -------
     matplotlib.figure.Figure
@@ -655,7 +655,7 @@ def plot_annealing_progress(iterations, biomasses, output_path=None, show=False)
     """
     plt.figure(figsize=(10, 6))
     plt.plot(iterations, biomasses, marker='o', linestyle='-', color='b', label='Biomass')
-    
+
     # Add labels and title
     plt.xlabel('Iterations', fontsize=16)
     plt.ylabel('Biomass (1/hr)', fontsize=16)
@@ -663,21 +663,21 @@ def plot_annealing_progress(iterations, biomasses, output_path=None, show=False)
     plt.legend()
     plt.xticks(fontsize=14)
     plt.yticks(fontsize=14)
-    
+
     # Save if path provided
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return plt.gcf()
 
 def analyze_kcat_changes(original_kcat_file, optimized_kcat_df, output_dir=None, prefix=""):
     """
     Analyze and visualize changes in kcat values after optimization.
-    
+
     Parameters
     ----------
     original_kcat_file : str
@@ -688,7 +688,7 @@ def analyze_kcat_changes(original_kcat_file, optimized_kcat_df, output_dir=None,
         Directory to save output files
     prefix : str, optional
         Prefix for output filenames
-        
+
     Returns
     -------
     pandas.DataFrame
@@ -697,7 +697,7 @@ def analyze_kcat_changes(original_kcat_file, optimized_kcat_df, output_dir=None,
     # Load original kcat values
     old_kcats = pd.read_csv(original_kcat_file)
     new_kcats = optimized_kcat_df
-    
+
     # Clean and prepare data
     old_kcats = old_kcats.dropna(subset=['kcat (1/hr)'])
     old_kcats["kcat (1/hr)"] = old_kcats["kcat (1/hr)"].astype(float)
@@ -705,7 +705,7 @@ def analyze_kcat_changes(original_kcat_file, optimized_kcat_df, output_dir=None,
     old_kcats = old_kcats.drop_duplicates(subset=["Reactions", "Single_gene"], keep="first")
     old_kcats = old_kcats.reset_index(drop=True)
     old_kcats = old_kcats.sort_values(by='Reactions')
-    
+
     # Clean new kcats
     new_kcats = new_kcats.dropna(subset=['kcat (1/hr)'])
     new_kcats["kcat (1/hr)"] = new_kcats["kcat (1/hr)"].astype(float)
@@ -713,26 +713,26 @@ def analyze_kcat_changes(original_kcat_file, optimized_kcat_df, output_dir=None,
     new_kcats = new_kcats.drop_duplicates(subset=["Reactions", "Single_gene"], keep="first")
     new_kcats = new_kcats.reset_index(drop=True)
     new_kcats = new_kcats.sort_values(by='Reactions')
-    
+
     # Merge the two dataframes on 'Reactions'
-    merged_kcats = pd.merge(old_kcats, new_kcats, 
-                            on=['Reactions', 'SMILES', 'Single_gene'], 
+    merged_kcats = pd.merge(old_kcats, new_kcats,
+                            on=['Reactions', 'SMILES', 'Single_gene'],
                             suffixes=('_old', '_new'))
-    
+
     # Save if output_dir provided
     if output_dir:
         merged_kcats.to_csv(os.path.join(output_dir, f"{prefix}merged_kcats.csv"), index=False)
-        
+
         # Create visualization plots
         plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats,
                                          output_dir=output_dir, prefix=prefix)
-    
+
     return merged_kcats
 
 def plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats, output_dir=None, prefix=""):
     """
     Create visualizations comparing original and optimized kcat distributions.
-    
+
     Parameters
     ----------
     old_kcats : pandas.DataFrame
@@ -747,14 +747,14 @@ def plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats, output
         Prefix for output filenames
     """
     import seaborn as sns
-    
+
     # Ensure directory exists if provided
     if output_dir:
         ensure_dir_exists(output_dir)
-    
+
     # Set up visualization style
     sns.set_style("whitegrid")
-    
+
     # Create histogram comparison
     plt.figure(figsize=(10, 6))
     sns.histplot(old_kcats['kcat (1/hr)'], color='orange', label='Original kcats', kde=False, bins=10)
@@ -766,17 +766,17 @@ def plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats, output
     plt.xscale('log')
     plt.xticks(fontsize=14)
     plt.yticks(fontsize=14)
-    
+
     if output_dir:
         plt.savefig(os.path.join(output_dir, f"{prefix}kcat_histogram.png"), dpi=300, bbox_inches='tight')
-    
+
     # Create boxplot comparison
     plt.figure(figsize=(10, 6))
     combined_data = pd.DataFrame({
         'kcat (1/hr)': pd.concat([old_kcats['kcat (1/hr)'], new_kcats['kcat (1/hr)']]),
         'Type': ['Original kcats'] * len(old_kcats) + ['Optimized kcats'] * len(new_kcats),
     })
-    
+
     sns.boxplot(x='kcat (1/hr)', y='Type', data=combined_data)
     plt.xscale('log')
     plt.title('Comparison of kcat Distributions', fontsize=16)
@@ -784,10 +784,10 @@ def plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats, output
     plt.ylabel('', fontsize=16)
     plt.xticks(fontsize=14)
     plt.yticks(fontsize=14)
-    
+
     if output_dir:
         plt.savefig(os.path.join(output_dir, f"{prefix}kcat_boxplot.png"), dpi=300, bbox_inches='tight')
-    
+
     # Create scatter plot comparing old vs new kcats
     plt.figure(figsize=(10, 8))
     sns.scatterplot(x='kcat (1/hr)_old', y='kcat (1/hr)_new', data=merged_kcats)
@@ -798,14 +798,14 @@ def plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats, output
     plt.ylabel('Optimized kcat (1/hr)', fontsize=16)
     plt.xticks(fontsize=14)
     plt.yticks(fontsize=14)
-    
+
     # Add a diagonal line for reference
     lims = [
         min(plt.xlim()[0], plt.ylim()[0]),
         max(plt.xlim()[1], plt.ylim()[1]),
     ]
     plt.plot(lims, lims, 'k--', alpha=0.5, zorder=0)
-    
+
     if output_dir:
         plt.savefig(os.path.join(output_dir, f"{prefix}kcat_scatter.png"), dpi=300, bbox_inches='tight')
 
@@ -838,7 +838,7 @@ def calculate_flux_metrics(fva_df):
     return fvi, fvr
 
 
-def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name, 
+def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
                                 output_path=None, figsize=(12, 8), show=False,
                                 legend_position='upper left', enhanced=True):
     """
@@ -889,7 +889,7 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
     # Main plot: Cumulative distribution of FVi
     all_fvi_values = []
     fvi_stats = {}
-    
+
     for label, fva_df in fva_results_dict.items():
         fvi, fvr = calculate_flux_metrics(fva_df)
         # Filter out zero values for log plotting
@@ -903,7 +903,7 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
 
         ax1.plot(fvi_sorted, cumulative, label=label,
                 color=colors.get(label, None), linewidth=2.5)
-        
+
         # Store stats for bottom plot
         if enhanced:
             fvi_stats[label] = {
@@ -920,14 +920,14 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
         # Get the FVi range for x-axis reference
         all_fvi_min = min(all_fvi_values) if all_fvi_values else 1e-15
         all_fvi_max = max(all_fvi_values) if all_fvi_values else 1e3
-        
+
         for label, stats in fvi_stats.items():
             color = colors.get(label, '#000000')
             biomass_value = stats['biomass']
-            ax2.plot([all_fvi_min, all_fvi_max], 
+            ax2.plot([all_fvi_min, all_fvi_max],
                     [biomass_value, biomass_value],
                     color=color, linestyle='--', linewidth=2, alpha=0.8)
-        
+
         # Format bottom plot
         ax2.set_xscale('log')
         ax2.set_xlim(ax1.get_xlim())  # Match x-axis limits with top plot
@@ -950,7 +950,7 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
 
     # Add legend
     ax1.legend(loc=legend_position, fontsize=12, framealpha=0.9)
-    
+
     plt.tight_layout()
 
     # Save if output path provided
@@ -965,7 +965,7 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
     return fig
 
 
-def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None, 
+def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
                              figsize=(12, 8), show=False):
     """
     Create box plot of FVi distributions for FVA ablation study.
@@ -991,11 +991,11 @@ def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
     set_plotting_style()
 
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     fvi_data = []
     labels = []
     colors_list = []
-    
+
     colors = {
         'Level 1: Baseline GEM': '#1f77b4',
         'Level 2: Single Enzyme': '#ff7f0e',
@@ -1005,7 +1005,7 @@ def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
         'Level 4: All Constraints': '#8c564b',
         'Level 5: Post-Tuned': '#e377c2'
     }
-    
+
     for label, fva_df in fva_results_dict.items():
         fvi, fvr = calculate_flux_metrics(fva_df)
         # Use log scale for better visualization, filter zeros
@@ -1014,13 +1014,13 @@ def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
             fvi_data.append(np.log10(fvi_nonzero))
             labels.append(label.replace('Level ', 'L').replace(': ', '\n'))
             colors_list.append(colors[label])
-    
+
     bp = ax.boxplot(fvi_data, labels=labels, patch_artist=True, showfliers=False)
-    
+
     for patch, color in zip(bp['boxes'], colors_list):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
-    
+
     ax.set_ylabel('log₁₀(FVi)', fontsize=12)
     ax.set_title(f'{model_name}: Distribution of Flux Variability (FVi) by Constraint Level', fontsize=14)
     ax.grid(True, alpha=0.3, axis='y')
@@ -1067,12 +1067,12 @@ def plot_biomass_progression(fva_results_dict, biomass_dict, model_name,
     set_plotting_style()
 
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Extract level numbers for x-axis
     level_nums = []
     biomass_vals = []
     level_labels = []
-    
+
     for label in fva_results_dict.keys():
         if 'Level 1' in label:
             level_nums.append(1)
@@ -1088,31 +1088,31 @@ def plot_biomass_progression(fva_results_dict, biomass_dict, model_name,
             level_nums.append(4)
         elif 'Level 5' in label:
             level_nums.append(5)
-        
+
         biomass_vals.append(biomass_dict[label])
         level_labels.append(label)
-    
+
     # Sort by level number
     sorted_data = sorted(zip(level_nums, biomass_vals, level_labels))
     level_nums, biomass_vals, level_labels = zip(*sorted_data)
-    
+
     ax.plot(level_nums, biomass_vals, 'o-', linewidth=2, markersize=8, color='steelblue')
-    
+
     # Annotate points
     for x, y, label in zip(level_nums, biomass_vals, level_labels):
-        ax.annotate(f'{y:.4f}', (x, y), textcoords="offset points", 
+        ax.annotate(f'{y:.4f}', (x, y), textcoords="offset points",
                    xytext=(0,10), ha='center', fontsize=10)
-    
+
     ax.set_xlabel('Constraint Level', fontsize=12)
     ax.set_ylabel('Biomass (1/hr)', fontsize=12)
     ax.set_title(f'{model_name}: Biomass Production vs Constraint Complexity', fontsize=14)
     ax.grid(True, alpha=0.3)
-    
+
     # Custom x-axis labels
     ax.set_xticks(level_nums)
-    ax.set_xticklabels([label.replace('Level ', 'L').replace(': ', '\n') for label in level_labels], 
+    ax.set_xticklabels([label.replace('Level ', 'L').replace(': ', '\n') for label in level_labels],
                       fontsize=10, rotation=45, ha='right')
-    
+
     plt.tight_layout()
 
     # Save if output path provided
@@ -1153,11 +1153,11 @@ def generate_fva_ablation_summary_statistics(fva_results_dict, biomass_dict, out
 
         # Flag reactions with high flux variability range (potential issues)
         high_range_reactions = fvr >= 1000
-        
+
         # Additional metrics
         zero_flux_reactions = (fvi == 0).sum()
         high_var_reactions = (fvi > 1).sum()
-        
+
         summary_data.append({
             'Level': label,
             'Biomass (1/hr)': biomass,
@@ -1181,7 +1181,7 @@ def generate_fva_ablation_summary_statistics(fva_results_dict, biomass_dict, out
         })
 
     summary_df = pd.DataFrame(summary_data)
-    
+
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
         summary_df.to_csv(output_path, index=False)
@@ -1215,7 +1215,7 @@ def create_fva_ablation_dashboard(fva_results_dict, biomass_dict, model_name,
         Dictionary of generated plot figures and summary statistics
     """
     ensure_dir_exists(output_dir)
-    
+
     results = {}
 
     # 1. Enhanced cumulative plot
@@ -1261,7 +1261,7 @@ def create_fva_ablation_dashboard(fva_results_dict, biomass_dict, model_name,
 
     return results
 
-def plot_cumulative_fvi_distribution(fva_dataframes, labels, output_path=None, 
+def plot_cumulative_fvi_distribution(fva_dataframes, labels, output_path=None,
                                     figsize=(12, 8), show=False, title=None,
                                     legend_position='upper left'):
     """
@@ -1300,13 +1300,13 @@ def plot_cumulative_fvi_distribution(fva_dataframes, labels, output_path=None,
 
     # Define colors (cycling through if more datasets than colors)
     colors = plt.cm.tab10.colors
-    
+
     fvi_at_0_5 = []
 
     for i, (df, label) in enumerate(zip(fva_dataframes, labels)):
         # Calculate FVi using standard method
         fvi, _ = calculate_flux_metrics(df)
-        
+
         # Filter out invalid values
         fvi_values = fvi.values
         fvi_values = fvi_values[~np.isnan(fvi_values)]
@@ -1358,7 +1358,7 @@ def plot_cumulative_fvi_distribution(fva_dataframes, labels, output_path=None,
 
     # Add legend
     ax1.legend(loc=legend_position, fontsize=12, framealpha=0.9)
-    
+
     plt.tight_layout()
 
     # Print summary statistics

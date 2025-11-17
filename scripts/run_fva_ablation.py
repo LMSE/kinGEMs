@@ -45,9 +45,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from kinGEMs.dataset import (
     load_model,
-    merge_substrate_sequences,
-    prepare_model_data,
-    process_kcat_predictions,
 )
 from kinGEMs.dataset_modelseed import prepare_modelseed_model_data
 from kinGEMs.modeling.fva import (
@@ -579,10 +576,10 @@ def main():
     # ===================================================================
     # Generate Plots and Summary using universal plotting functions
     # ===================================================================
-    
+
     # Create comprehensive dashboard with all plots and statistics
     create_fva_ablation_dashboard(
-        fva_results, biomass_values, model_name, results_dir, 
+        fva_results, biomass_values, model_name, results_dir,
         prefix="fva_ablation", show=False
     )
 

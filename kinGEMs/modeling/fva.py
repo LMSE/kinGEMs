@@ -279,11 +279,11 @@ def compare_fva_results(fva_result1, fva_result2, name1='Model 1', name2='Model 
 
     return comparison
 
-# Import from universal plots module  
+# Import from universal plots module
 def plot_flux_variability(fva_results, reactions=None, figsize=(12, 8), output_file=None):
     """
     Create a plot visualizing the flux variability for selected reactions.
-    
+
     This function now redirects to the universal plotting function in plots.py
     for consistency across the kinGEMs pipeline.
 
@@ -305,7 +305,7 @@ def plot_flux_variability(fva_results, reactions=None, figsize=(12, 8), output_f
         The plot figure
     """
     from ..plots import plot_fva_results
-    
+
     # Convert to the expected format for the universal function
     # The universal function expects 'Max Solutions' and 'Min Solutions' columns
     return plot_fva_results(
@@ -320,7 +320,7 @@ def plot_flux_variability(fva_results, reactions=None, figsize=(12, 8), output_f
 def plot_cumulative_fvi_distribution(dfs, labels, output_file=None, roboto_font=None):
     """
     Plot cumulative distributions of Flux Variability Index (FVi) for multiple FVA result sets.
-    
+
     This function now redirects to the universal plotting function in plots.py
     for consistency across the kinGEMs pipeline.
 
@@ -341,10 +341,10 @@ def plot_cumulative_fvi_distribution(dfs, labels, output_file=None, roboto_font=
         The plot figure
     """
     from ..plots import plot_cumulative_fvi_distribution as universal_plot
-    
+
     # The universal function expects show parameter instead of directly saving/showing
     show_plot = output_file is None
-    
+
     return universal_plot(
         fva_dataframes=dfs,
         labels=labels,
