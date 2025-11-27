@@ -279,6 +279,24 @@ def run_optimization(
         # Standard flux variables for irreversible reactions
         m.v_irr = Var(m.R_irr, domain=Reals, bounds=v_irr_bounds,  # noqa: F405
                       initialize=lambda mo, j: flux0.get(j, 0.0))
+
+        # OPTION C: Direction-specific enzyme allocation for reversible reactions
+        # Each gene can allocate enzyme to forward OR reverse direction, but not both simultaneously
+        m.E_fwd = Var(m.G, m.R_rev, domain=NonNegativeReals, initialize=0.005)  # noqa: F405
+        m.E_rev = Var(m.G, m.R_rev, domain=NonNegativeReals, initialize=0.005)  # noqa: F405
+
+        # Standard enzyme variables
+        m.E = Var(m.G, domain=NonNegativeReals, initialize=0.01)  # noqa: F405
+
+        # Constraint: direction-specific enzyme allocation cannot exceed total enzyme
+        def enzyme_allocation_constraint(mo, g, j):
+            if j in mo.R_rev:
+                return mo.E_fwd[g, j] + mo.E_rev[g, j] <= mo.E[g]
+            else:
+                return Constraint.Feasible  # noqa: F405
+
+        m.enzyme_allocation = Constraint(m.G, m.R, rule=enzyme_allocation_constraint)  # noqa: F405
+
     else:
         # Standard single flux variable for all reactions
         m.v = Var(  # noqa: F405
@@ -287,8 +305,8 @@ def run_optimization(
             bounds=lambda mo, j: (lb[j], ub[j]),
             initialize=lambda mo, j: flux0.get(j, 0.0)
         )
-
-    m.E = Var(m.G, domain=NonNegativeReals, initialize=0.01)  # noqa: F405
+        # Standard enzyme variables
+        m.E = Var(m.G, domain=NonNegativeReals, initialize=0.01)  # noqa: F405
 
     # Mass balance
     # substep_start = time.time()
@@ -412,10 +430,11 @@ def run_optimization(
             # Choose the appropriate flux variable based on reaction type and direction
             if bidirectional_constraints and rxn_id in mo.R_rev:
                 # For reversible reactions with bidirectional constraints
+                # Use direction-specific enzyme allocation (Option C)
                 if direction == 'forward':
-                    return mo.v_fwd[rxn_id] <= k_val * mo.E[g]
+                    return mo.v_fwd[rxn_id] <= k_val * mo.E_fwd[g, rxn_id]
                 elif direction == 'reverse':
-                    return mo.v_rev[rxn_id] <= k_val * mo.E[g]
+                    return mo.v_rev[rxn_id] <= k_val * mo.E_rev[g, rxn_id]
                 else:
                     constraints_skipped += 1
                     return Constraint.Skip  # noqa: F405
@@ -458,10 +477,12 @@ def run_optimization(
 
             # Choose the appropriate flux variable
             if bidirectional_constraints and rxn_id in mo.R_rev:
+                # For enzyme complexes in reversible reactions
+                # Use direction-specific enzyme allocation (Option C)
                 if direction == 'forward':
-                    return mo.v_fwd[rxn_id] <= k_val * mo.E[gene_id]
+                    return mo.v_fwd[rxn_id] <= k_val * mo.E_fwd[gene_id, rxn_id]
                 elif direction == 'reverse':
-                    return mo.v_rev[rxn_id] <= k_val * mo.E[gene_id]
+                    return mo.v_rev[rxn_id] <= k_val * mo.E_rev[gene_id, rxn_id]
                 else:
                     constraints_skipped += 1
                     return Constraint.Skip  # noqa: F405
@@ -559,7 +580,11 @@ def run_optimization(
                 kl = kcat_dict.get((rxn_id, g, direction), [])
                 if kl:
                     kmin = min(kl)
-                    terms.append(kmin * mo.E[g])
+                    # Use direction-specific enzyme allocation (Option C)
+                    if direction == 'forward':
+                        terms.append(kmin * mo.E_fwd[g, rxn_id])
+                    else:  # reverse
+                        terms.append(kmin * mo.E_rev[g, rxn_id])
 
             if not terms:
                 iso_skipped += 1
@@ -588,7 +613,7 @@ def run_optimization(
             m.BI = Set(initialize=bidirectional_iso_keys, dimen=2)  # noqa: F405
             m.kcat_iso_bidirectional = Constraint(m.BI, rule=iso_bidirectional_rule)  # noqa: F405
 
-    # 6c) MIXED OR+AND: Handle complex cases like (g1 and g2) or (g3 and g4) or g5
+    # 6c) MIXED OR+AND: Handle complex nested cases like (g1 and g2) or (g3 and g4) or g5
     def mixed_rule(mo, rxn_id):
         nonlocal mixed_added, mixed_skipped
         clauses = dnf_clauses.get(rxn_id, [])
@@ -602,46 +627,108 @@ def run_optimization(
             mixed_skipped += 1
             return Constraint.Skip  # noqa: F405
 
-        # Mixed OR+AND: v_j <= sum over all clauses of (kcat_clause * min(E[g] for g in clause))
-        # Each clause represents an alternative enzyme (complex)
-        # The reaction can use any of these alternatives, so we sum their capacities
+        # NESTED APPROACH: Handle each clause based on its structure
+        # 1. Single genes (isoenzymes): use their individual capacity
+        # 2. Multi-gene clauses (complexes): handle as enzyme complexes
+        # 3. Sum all alternative capacities (OR relationship between clauses)
 
-        clause_terms = []
-        for clause in clauses:
-            # Get kcats for all genes in this clause
-            clause_kcats = []
-            for g in clause:
-                kl = kcat_dict.get((rxn_id, g), [])
+        def get_clause_capacity(clause):
+            """Calculate the capacity contribution of a single clause"""
+            if len(clause) == 1:
+                # Single gene - this is an isoenzyme alternative
+                g = clause[0]
+                if bidirectional_constraints:
+                    # Check for direction-specific data first
+                    forward_key = (rxn_id, g, 'forward')
+                    reverse_key = (rxn_id, g, 'reverse')
+                    standard_key = (rxn_id, g)
+
+                    if forward_key in kcat_dict:
+                        kl = kcat_dict[forward_key]
+                    elif reverse_key in kcat_dict:
+                        kl = kcat_dict[reverse_key]
+                    elif standard_key in kcat_dict:
+                        kl = kcat_dict[standard_key]
+                    else:
+                        kl = []
+                else:
+                    kl = kcat_dict.get((rxn_id, g), [])
+
                 if kl:
-                    clause_kcats.extend(kl)
+                    # For isoenzymes, use minimum kcat (most conservative)
+                    kcat_val = min(kl)
+                    return kcat_val * mo.E[g]
+                else:
+                    return 0  # No kcat data available
 
-            if not clause_kcats:
-                continue  # Skip this clause if no kcat data
-
-            # For an enzyme complex (multiple genes in AND), use average kcat
-            # and the constraint is limited by the minimum enzyme amount
-            if len(clause) > 1:
-                avg_kcat = sum(clause_kcats) / len(clause_kcats)
-                # For a complex, the limiting factor is the least abundant subunit
-                # So we use min(E[g] for g in clause)
-                # But in Pyomo we can't directly use min() in constraints
-                # Instead, we add the capacity assuming all subunits are present
-                # This is an approximation: kcat * sum(E[g]) / n_genes
-                clause_capacity = avg_kcat * sum(mo.E[g] for g in clause) / len(clause)
             else:
-                # Single gene in this clause
-                max_kcat = max(clause_kcats)
-                clause_capacity = max_kcat * mo.E[clause[0]]
+                # Multi-gene clause - this is an enzyme complex
+                # All genes must be present for the complex to function
+                complex_kcats = []
 
-            clause_terms.append(clause_capacity)
+                for g in clause:
+                    if bidirectional_constraints:
+                        # Check for direction-specific data
+                        forward_key = (rxn_id, g, 'forward')
+                        reverse_key = (rxn_id, g, 'reverse')
+                        standard_key = (rxn_id, g)
 
-        if not clause_terms:
+                        if forward_key in kcat_dict:
+                            kl = kcat_dict[forward_key]
+                        elif reverse_key in kcat_dict:
+                            kl = kcat_dict[reverse_key]
+                        elif standard_key in kcat_dict:
+                            kl = kcat_dict[standard_key]
+                        else:
+                            kl = []
+                    else:
+                        kl = kcat_dict.get((rxn_id, g), [])
+
+                    if kl:
+                        complex_kcats.extend(kl)
+
+                if not complex_kcats:
+                    return 0  # No kcat data for this complex
+
+                # For enzyme complexes:
+                # - Use average kcat across all subunits
+                # - The limiting factor is the minimum enzyme amount among subunits
+                # - But we need to handle this in a linearizable way
+
+                avg_kcat = sum(complex_kcats) / len(complex_kcats)
+
+                # Option C implementation: Direction-specific enzyme allocation
+                # For now, use a simplified approach that approximates the complex constraint
+                # The capacity is limited by the average enzyme availability
+                # This is an approximation: in reality, we'd need min(E[g] for g in clause)
+                avg_enzyme = sum(mo.E[g] for g in clause) / len(clause)
+
+                return avg_kcat * avg_enzyme
+
+        # Calculate total capacity as sum of all clause capacities (OR relationship)
+        clause_capacities = []
+        for clause in clauses:
+            capacity = get_clause_capacity(clause)
+            if capacity > 0:  # Only include clauses with valid kcat data
+                clause_capacities.append(capacity)
+
+        if not clause_capacities:
             mixed_skipped += 1
             return Constraint.Skip  # noqa: F405
 
         mixed_added += 1
-        # The reaction can use any of the alternative pathways
-        return mo.v[rxn_id] <= sum(clause_terms)
+
+        # Choose appropriate flux variable based on bidirectional constraints
+        if bidirectional_constraints and rxn_id in mo.R_rev:
+            # For reversible reactions in bidirectional mode, we need separate constraints
+            # This is a simplification - ideally we'd have direction-specific mixed rules
+            mixed_skipped += 1
+            mixed_added -= 1  # Revert the counter
+            return Constraint.Skip  # noqa: F405  # Let bidirectional constraints handle this
+        elif bidirectional_constraints and rxn_id in mo.R_irr:
+            return mo.v_irr[rxn_id] <= sum(clause_capacities)
+        else:
+            return mo.v[rxn_id] <= sum(clause_capacities)
 
     # Only add mixed constraints if neither isoenzymes nor complexes are disabled
     if not isoenzymes_off and not complexes_off:
@@ -658,15 +745,19 @@ def run_optimization(
 
                 # Handle bidirectional vs standard constraints
                 if bidirectional_constraints:
-                    # For bidirectional constraints, need to handle different flux variables
+                    # For bidirectional constraints with Option C, use direction-specific allocation
+                    # We need to account for usage in both forward and reverse directions
+
+                    # Forward direction usage
+                    if r_id in mo.R_rev or r_id in mo.R_irr:
+                        for k in kcat_dict.get((r_id, g_id, 'forward'), []):
+                            usage.append(mo.v_fwd[r_id] / k)
+
+                    # Reverse direction usage (only for reversible reactions)
                     if r_id in mo.R_rev:
-                        # Reversible reaction: use net flux (v_fwd - v_rev)
-                        for k in kcat_dict.get((r_id, g_id), []):
-                            usage.append((mo.v_fwd[r_id] - mo.v_rev[r_id]) / k)
-                    elif r_id in mo.R_irr:
-                        # Irreversible reaction: use standard flux variable
-                        for k in kcat_dict.get((r_id, g_id), []):
-                            usage.append(mo.v_irr[r_id] / k)
+                        for k in kcat_dict.get((r_id, g_id, 'reverse'), []):
+                            usage.append(mo.v_rev[r_id] / k)
+
                 else:
                     # Standard constraints: use standard flux variable
                     for k in kcat_dict.get((r_id, g_id), []):
@@ -857,6 +948,19 @@ def run_optimization(
     for g in m.G:
         enz_val = m.E[g].value if m.E[g].value is not None else 0.0
         records.append(('enzyme', g, enz_val))
+
+        # If using bidirectional constraints with direction-specific allocation (Option C),
+        # also collect forward and reverse enzyme allocations
+        if bidirectional_constraints and hasattr(m, 'E_fwd') and hasattr(m, 'E_rev'):
+            # Collect forward and reverse enzyme allocations for each reaction
+            for r in m.R:
+                if (g, r) in m.E_fwd:
+                    e_fwd_val = m.E_fwd[g, r].value if m.E_fwd[g, r].value is not None else 0.0
+                    records.append(('enzyme_fwd', f"{g}_{r}", e_fwd_val))
+
+                if (g, r) in m.E_rev:
+                    e_rev_val = m.E_rev[g, r].value if m.E_rev[g, r].value is not None else 0.0
+                    records.append(('enzyme_rev', f"{g}_{r}", e_rev_val))
 
     df_FBA = pd.DataFrame(records, columns=['Variable','Index','Value'])
 
