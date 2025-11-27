@@ -608,25 +608,40 @@ def main():
     print(f"  Max iterations: {sa_config['max_iterations']}")
     print(f"  Top enzymes to modify: {sa_config['n_top_enzymes']}")
 
-    # Set up reference compound environment for tuning
+    # Set up for tuning (use original model, let simulated_annealing handle constraints)
     tuning_model = model.copy()
     blocked_cpds = config["biolog_validation"].get("blocked_compounds", [])
 
-    # Block all compounds except reference compound
-    for cpd in blocked_cpds:
-        if cpd != reference_cpd:  # Don't block reference compound
-            ex_rxn_id = f"EX_{cpd}_e0"
-            if ex_rxn_id in tuning_model.reactions:
-                tuning_model.reactions.get_by_id(ex_rxn_id).lower_bound = 0
+    # Check initial growth rate in unrestricted environment (like pipeline)
+    print("  Checking initial unrestricted growth rate before tuning...")
 
-    # Set reference compound uptake
-    reference_ex = f"EX_{reference_cpd}_e0"
-    if reference_ex in tuning_model.reactions:
-        tuning_model.reactions.get_by_id(reference_ex).lower_bound = -abs(config["biolog_validation"]["uptake_rate"])
+    # Get unrestricted baseline growth rate (like pipeline does)
+    test_model = model.copy()
+    test_model.objective = biomass_reaction
+    unrestricted_solution = test_model.optimize()
+    initial_unrestricted_rate = unrestricted_solution.objective_value if unrestricted_solution.status == 'optimal' else 0.0
 
-    # Check initial growth rate before tuning
-    print(f"  Checking initial {reference_cpd} growth rate before tuning...")
-    initial_growth_rate = simulate_growth_rate(
+    # Run unrestricted kinGEMs optimization
+    initial_growth_rate, _, _, _ = run_optimization_with_dataframe(
+        model=model,
+        processed_df=processed_data,
+        objective_reaction=biomass_reaction,
+        enzyme_upper_bound=config.get("enzyme_upper_bound", 0.15),
+        enzyme_ratio=True,
+        maximization=True,
+        multi_enzyme_off=False,
+        isoenzymes_off=False,
+        promiscuous_off=False,
+        complexes_off=False,
+        output_dir=None,
+        save_results=False,
+        print_reaction_conditions=False,
+        verbose=False,
+        solver_name=config['solver']
+    )
+
+    # Check what happens with glucose-specific constraints for reference
+    glucose_specific_rate = simulate_growth_rate(
         model=model,
         processed_df=processed_data,
         biomass_reaction=biomass_reaction,
@@ -637,7 +652,6 @@ def main():
         solver_name=config['solver']
     )
 
-    # Check baseline COBRApy FBA growth rate (no enzyme constraints)
     baseline_growth_rate = simulate_baseline_growth_rate(
         model=model,
         biomass_reaction=biomass_reaction,
@@ -646,11 +660,30 @@ def main():
         uptake_rate=config["biolog_validation"]["uptake_rate"]
     )
 
-    print(f"  Initial kinGEMs {reference_cpd} growth rate: {initial_growth_rate:.4f}")
-    print(f"  Baseline COBRApy {reference_cpd} growth rate: {baseline_growth_rate:.4f}")
-    print(f"  Target {reference_cpd} growth rate: {tuning_target:.4f}")
-    print(f"  Initial accuracy gap: {abs(initial_growth_rate - tuning_target):.4f}")
-    print(f"  Baseline accuracy gap: {abs(baseline_growth_rate - tuning_target):.4f}")
+    print(f"  Initial unrestricted kinGEMs growth rate: {initial_growth_rate:.4f}")
+    print(f"  Initial unrestricted COBRApy growth rate: {initial_unrestricted_rate:.4f}")
+    print(f"  Initial {reference_cpd}-constrained kinGEMs growth rate: {glucose_specific_rate:.4f}")
+    print(f"  Initial {reference_cpd}-constrained COBRApy growth rate: {baseline_growth_rate:.4f}")
+    print(f"  Target growth rate: {tuning_target:.4f}")
+    print(f"  Unrestricted accuracy gap: {abs(initial_growth_rate - tuning_target):.4f}")
+
+    # Use the same approach as the pipeline - no custom medium constraints
+    # Let simulated_annealing handle optimization without pre-set medium conditions
+    medium = None
+    medium_upper_bound = True  # Match pipeline default
+
+    print("  Medium conditions: None (following pipeline approach)")
+
+    # Get simulated annealing configuration with adjusted thresholds
+    sa_config = config.get("simulated_annealing", {})
+
+    # Adjust change threshold to be more sensitive to small improvements
+    original_threshold = sa_config.get('change_threshold', 0.001)
+    adjusted_threshold = 0.0001  # Much smaller threshold for detecting changes
+    sa_config['change_threshold'] = adjusted_threshold
+
+    print(f"  Adjusted change threshold: {original_threshold} → {adjusted_threshold}")
+    print(f"  Max unchanged iterations: {sa_config.get('max_unchanged_iterations', 3)}")
 
     # Run simulated annealing
     kcat_dict, top_targets, tuned_df, iterations, biomasses, df_FBA = simulated_annealing(
@@ -669,6 +702,8 @@ def main():
         change_threshold=sa_config['change_threshold'],
         n_top_enzymes=sa_config['n_top_enzymes'],
         verbose=sa_config['verbose'],
+        medium=medium,
+        medium_upper_bound=medium_upper_bound,
     )
 
     print("  Simulated annealing completed")
