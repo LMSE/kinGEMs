@@ -45,6 +45,58 @@ TAXONOMY_IDS = {
       # Add more organisms as needed
 }
 
+# ModelSEED genome to organism mapping
+MODELSEED_GENOME_MAPPING = {
+    '382_genome_cpd03198': {
+        'organism': 'Escherichia coli',
+        'strain': 'Escherichia coli',
+        'biolog_sheet': 'Ecoli',
+        'taxonomy_id': 83333
+    },
+    '376_genome_cpd03198': {
+        'organism': 'Bacteroides ovatus',
+        'strain': 'Bacteroides ovatus',
+        'biolog_sheet': 'Bovatus',
+        'taxonomy_id': 28116
+    },
+    '378_genome_cpd03198': {
+        'organism': 'Parabacteroides distasonis',
+        'strain': 'Parabacteroides distasonis',
+        'biolog_sheet': 'Pdistasonis',
+        'taxonomy_id': 823
+    },
+    '380_genome_cpd01262': {
+        'organism': 'Muricomes sp000509105',
+        'strain': 'Muricomes sp000509105',
+        'biolog_sheet': 'Muricomes',
+        'taxonomy_id': None  # Unknown/custom taxonomy
+    }
+}
+
+def get_organism_info(model_name):
+    """
+    Get organism information for a given ModelSEED genome model.
+
+    Parameters
+    ----------
+    model_name : str
+        Model name (e.g., '382_genome_cpd03198')
+
+    Returns
+    -------
+    dict
+        Dictionary with organism, strain, biolog_sheet, and taxonomy_id
+    """
+    # Remove .xml extension if present
+    clean_name = model_name.replace('.xml', '')
+
+    return MODELSEED_GENOME_MAPPING.get(clean_name, {
+        'organism': 'Unknown',
+        'strain': 'Unknown',
+        'biolog_sheet': 'Unknown',
+        'taxonomy_id': None
+    })
+
 # REST datasets/endpoints to try, in order
 REST_DATASETS = [
     'uniprotkb',      # Swiss-Prot + TrEMBL
@@ -73,5 +125,5 @@ __all__ = [
     'REPORTS_DIR', 'FIGURES_DIR', 'BiGG_MAPPING', 'BIGG_METABOLITES',
     'CHEBI_COMPOUNDS', 'CHEBI_INCHI', 'METANETX_COMPOUNDS', 'METANETX_DEPR',
     'METANETX_XREF', 'SEED_COMPOUNDS', 'SEED_ALIASES', 'TAXONOMY_IDS',
-    'ensure_dir_exists'
+    'MODELSEED_GENOME_MAPPING', 'get_organism_info', 'ensure_dir_exists'
 ]

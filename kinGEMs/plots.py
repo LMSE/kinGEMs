@@ -810,9 +810,10 @@ def plot_kcat_distribution_comparison(old_kcats, new_kcats, merged_kcats, output
         plt.savefig(os.path.join(output_dir, f"{prefix}kcat_scatter.png"), dpi=300, bbox_inches='tight')
 
 def calculate_flux_metrics(fva_df):
-    """Calculate Flux Variability (FVi) as absolute flux range.
+    """Calculate both Flux Variability (FVi) and Flux Variability Range (FVR).
 
-    FVi = |max - min| - Absolute flux range for reaction i
+    FVi = (max - min) / (max + min + ε) - Relative variability (0-1 scale) for reaction i
+    FVR = |max - min| - Absolute flux range
 
     Parameters
     ----------
@@ -821,16 +822,20 @@ def calculate_flux_metrics(fva_df):
 
     Returns
     -------
-    pandas.Series
-        FVi values (absolute flux ranges)
+    tuple
+        (fvi, fvr) as pandas Series
     """
     max_flux = fva_df['Max Solutions']
     min_flux = fva_df['Min Solutions']
 
-    # Calculate FVi (Flux Variability for reaction i) - absolute difference
-    fvi = (max_flux - min_flux).abs()
+    # Calculate FVR (Flux Variability Range) - absolute difference
+    fvr = (max_flux - min_flux).abs()
 
-    return fvi
+    # Calculate FVi (Flux Variability for reaction i) - normalized relative variability
+    fvi =  fvr #(max_flux - min_flux) / (max_flux + min_flux + 1e-10)
+    # fvi =  #fvi.replace([np.inf, -np.inf], 0).fillna(0)
+
+    return fvi, fvr
 
 
 def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
@@ -886,7 +891,7 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
     fvi_stats = {}
 
     for label, fva_df in fva_results_dict.items():
-        fvi = calculate_flux_metrics(fva_df)
+        fvi, _ = calculate_flux_metrics(fva_df)
         # Filter out zero values for log plotting
         fvi_nonzero = fvi[fvi > 1e-15]
         if len(fvi_nonzero) == 0:
@@ -1005,7 +1010,7 @@ def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
     }
 
     for label, fva_df in fva_results_dict.items():
-        fvi = calculate_flux_metrics(fva_df)
+        fvi, fvr = calculate_flux_metrics(fva_df)
         # Use log scale for better visualization, filter zeros
         fvi_nonzero = fvi[fvi > 1e-15]
         if len(fvi_nonzero) > 0:
@@ -1023,6 +1028,105 @@ def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
     ax.set_title(f'{model_name}: Distribution of Flux Variability (FVi) by Constraint Level', fontsize=14)
     ax.grid(True, alpha=0.3, axis='y')
     plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+
+    # Save if output path provided
+    if output_path:
+        ensure_dir_exists(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+
+    # Show if requested
+    if show:
+        plt.show()
+
+    return fig
+
+
+def plot_fva_ablation_violinplot(fva_results_dict, model_name, output_path=None,
+                                 figsize=(14, 8), show=False):
+    """
+    Create violin plot of FVi distributions for FVA ablation study.
+
+    Parameters
+    ----------
+    fva_results_dict : dict
+        Dictionary with level labels as keys and FVA DataFrames as values
+    model_name : str
+        Name of the model for plot title
+    output_path : str, optional
+        Path to save the figure
+    figsize : tuple, optional
+        Figure size (width, height)
+    show : bool, optional
+        Whether to display the plot
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The plot figure
+    """
+    set_plotting_style()
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Prepare data for violin plot
+    fvi_data = []
+    labels = []
+    colors_list = []
+
+    colors = {
+        'Level 1: Baseline GEM': '#1f77b4',
+        'Level 2: Single Enzyme': '#ff7f0e',
+        'Level 3a: + Isoenzymes': '#2ca02c',
+        'Level 3b: + Complexes': '#d62728',
+        'Level 3c: + Promiscuous': '#9467bd',
+        'Level 4: All Constraints': '#8c564b',
+        'Level 5: Post-Tuned': '#e377c2'
+    }
+
+    for label, fva_df in fva_results_dict.items():
+        fvi, fvr = calculate_flux_metrics(fva_df)
+        # Use log scale for better visualization, filter zeros
+        fvi_nonzero = fvi[fvi > 1e-15]
+        if len(fvi_nonzero) > 0:
+            fvi_data.append(np.log10(fvi_nonzero))
+            labels.append(label.replace('Level ', 'L').replace(': ', '\n'))
+            colors_list.append(colors[label])
+
+    # Create violin plot
+    parts = ax.violinplot(fvi_data, positions=range(len(fvi_data)), showmeans=True,
+                         showmedians=True, showextrema=True)
+
+    # Color the violin plots
+    for i, (pc, color) in enumerate(zip(parts['bodies'], colors_list)):
+        pc.set_facecolor(color)
+        pc.set_alpha(0.7)
+        pc.set_edgecolor('black')
+        pc.set_linewidth(1)
+
+    # Color other elements
+    parts['cmeans'].set_colors(['black'])
+    parts['cmedians'].set_colors(['red'])
+    parts['cbars'].set_colors(['black'])
+    parts['cmaxes'].set_colors(['black'])
+    parts['cmins'].set_colors(['black'])
+
+    # Set x-axis labels
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha='right')
+
+    ax.set_ylabel('log₁₀(FVi)', fontsize=13)
+    ax.set_title(f'{model_name}: Flux Variability Distribution (Violin Plot)', fontsize=15, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='y')
+
+    # Add legend for mean and median lines
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], color='black', lw=2, label='Mean'),
+        Line2D([0], [0], color='red', lw=2, label='Median')
+    ]
+    ax.legend(handles=legend_elements, loc='upper right', fontsize=11)
+
     plt.tight_layout()
 
     # Save if output path provided
@@ -1146,8 +1250,7 @@ def generate_fva_ablation_summary_statistics(fva_results_dict, biomass_dict, out
     summary_data = []
 
     for label, fva_df in fva_results_dict.items():
-        fvi = calculate_flux_metrics(fva_df)
-        fvr = fvi  # FVi is the same as FVR (absolute difference)
+        fvi, fvr = calculate_flux_metrics(fva_df)
         biomass = biomass_dict[label]
 
         # Flag reactions with high flux variability range (potential issues)
@@ -1233,7 +1336,15 @@ def create_fva_ablation_dashboard(fva_results_dict, biomass_dict, model_name,
     )
     results['boxplot'] = boxplot_fig
 
-    # 3. Biomass progression plot
+    # 3. Violin plot of FVi distributions
+    violinplot_fig = plot_fva_ablation_violinplot(
+        fva_results_dict, model_name,
+        output_path=os.path.join(output_dir, f'{prefix}_violinplot.png'),
+        show=show
+    )
+    results['violinplot'] = violinplot_fig
+
+    # 4. Biomass progression plot
     biomass_fig = plot_biomass_progression(
         fva_results_dict, biomass_dict, model_name,
         output_path=os.path.join(output_dir, f'{prefix}_biomass_progression.png'),
@@ -1241,7 +1352,7 @@ def create_fva_ablation_dashboard(fva_results_dict, biomass_dict, model_name,
     )
     results['biomass_plot'] = biomass_fig
 
-    # 4. Summary statistics
+    # 5. Summary statistics
     summary_df = generate_fva_ablation_summary_statistics(
         fva_results_dict, biomass_dict,
         output_path=os.path.join(output_dir, f'{prefix}_summary.csv')
@@ -1255,6 +1366,7 @@ def create_fva_ablation_dashboard(fva_results_dict, biomass_dict, model_name,
     print("Generated files:")
     print(f"  - {prefix}_cumulative.png (enhanced plot)")
     print(f"  - {prefix}_boxplot.png (distribution analysis)")
+    print(f"  - {prefix}_violinplot.png (distribution density)")
     print(f"  - {prefix}_biomass_progression.png (biomass vs constraints)")
     print(f"  - {prefix}_summary.csv (summary statistics)")
 
@@ -1304,7 +1416,7 @@ def plot_cumulative_fvi_distribution(fva_dataframes, labels, output_path=None,
 
     for i, (df, label) in enumerate(zip(fva_dataframes, labels)):
         # Calculate FVi using standard method
-        fvi = calculate_flux_metrics(df)
+        fvi, _ = calculate_flux_metrics(df)
 
         # Filter out invalid values
         fvi_values = fvi.values
