@@ -379,10 +379,18 @@ def run_optimization(
     skip_reasons = {'no_clauses': 0, 'gene_mismatch': 0, 'no_kcat': 0, 'multiple_clauses': 0}
     iso_added = 0
     iso_skipped = 0
+    iso_skip_reasons = {'single_clause': 0, 'has_complex': 0, 'bidirectional_rev': 0, 'no_terms': 0}
     mixed_added = 0
     mixed_skipped = 0
+    mixed_skip_reasons = {'single_clause': 0, 'no_complex': 0, 'bidirectional_rev': 0, 'no_capacities': 0}
     promis_added = 0
     promis_skipped = 0
+    
+    # Bidirectional constraint counters
+    bidirectional_iso_added = 0
+    bidirectional_iso_skipped = 0
+    bidirectional_mixed_added = 0
+    bidirectional_mixed_skipped = 0
 
     # 6a) AND‐GPR: single or complex (simple cases only)
     def and_rule(mo, *args):
@@ -500,10 +508,11 @@ def run_optimization(
 
     # 6b) OR‐GPR: pure isoenzymes (no AND within clauses)
     def iso_rule(mo, rxn_id):
-        nonlocal iso_added, iso_skipped
+        nonlocal iso_added, iso_skipped, iso_skip_reasons
         clauses = dnf_clauses.get(rxn_id, [])
         if len(clauses) <= 1:
             iso_skipped += 1
+            iso_skip_reasons['single_clause'] += 1
             return Constraint.Skip  # noqa: F405
 
         # Check if this is pure isoenzymes (all clauses have single genes)
@@ -511,12 +520,14 @@ def run_optimization(
         has_complex_clause = any(len(clause) > 1 for clause in clauses)
         if has_complex_clause:
             iso_skipped += 1
+            iso_skip_reasons['has_complex'] += 1
             return Constraint.Skip  # noqa: F405
 
         # For bidirectional constraints, we need to create separate constraints for forward and reverse
         if bidirectional_constraints and rxn_id in mo.R_rev:
             # Handle separately for forward and reverse directions
             iso_skipped += 1
+            iso_skip_reasons['bidirectional_rev'] += 1
             return Constraint.Skip  # noqa: F405  # Will be handled by bidirectional iso rules
 
         # Pure isoenzymes: g1 or g2 or g3 (all single genes)
@@ -547,6 +558,7 @@ def run_optimization(
 
         if not terms:
             iso_skipped += 1
+            iso_skip_reasons['no_terms'] += 1
             return Constraint.Skip  # noqa: F405
 
         iso_added += 1
@@ -561,16 +573,16 @@ def run_optimization(
     # 6b2) Bidirectional isoenzyme constraints for reversible reactions
     if bidirectional_constraints and not isoenzymes_off:
         def iso_bidirectional_rule(mo, rxn_id, direction):
-            nonlocal iso_added, iso_skipped
+            nonlocal bidirectional_iso_added, bidirectional_iso_skipped
             clauses = dnf_clauses.get(rxn_id, [])
             if len(clauses) <= 1:
-                iso_skipped += 1
+                bidirectional_iso_skipped += 1
                 return Constraint.Skip  # noqa: F405
 
             # Check if this is pure isoenzymes
             has_complex_clause = any(len(clause) > 1 for clause in clauses)
             if has_complex_clause:
-                iso_skipped += 1
+                bidirectional_iso_skipped += 1
                 return Constraint.Skip  # noqa: F405
 
             # Pure isoenzymes for specific direction
@@ -587,10 +599,10 @@ def run_optimization(
                         terms.append(kmin * mo.E_rev[g, rxn_id])
 
             if not terms:
-                iso_skipped += 1
+                bidirectional_iso_skipped += 1
                 return Constraint.Skip  # noqa: F405
 
-            iso_added += 1
+            bidirectional_iso_added += 1
             if direction == 'forward':
                 return mo.v_fwd[rxn_id] <= sum(terms)
             else:  # reverse
@@ -615,17 +627,31 @@ def run_optimization(
 
     # 6c) MIXED OR+AND: Handle complex nested cases like (g1 and g2) or (g3 and g4) or g5
     def mixed_rule(mo, rxn_id):
-        nonlocal mixed_added, mixed_skipped
+        nonlocal mixed_added, mixed_skipped, mixed_skip_reasons
         clauses = dnf_clauses.get(rxn_id, [])
         if len(clauses) <= 1:
             mixed_skipped += 1
+            mixed_skip_reasons['single_clause'] += 1
             return Constraint.Skip  # noqa: F405
 
         # Only handle if at least one clause has multiple genes (complex)
         has_complex_clause = any(len(clause) > 1 for clause in clauses)
         if not has_complex_clause:
             mixed_skipped += 1
+            mixed_skip_reasons['no_complex'] += 1
             return Constraint.Skip  # noqa: F405
+
+        # Choose appropriate flux variable based on bidirectional constraints
+        if bidirectional_constraints and rxn_id in mo.R_rev:
+            # For reversible reactions in bidirectional mode, we need separate constraints
+            # Skip here and let bidirectional mixed constraints handle this
+            mixed_skipped += 1
+            mixed_skip_reasons['bidirectional_rev'] += 1
+            return Constraint.Skip  # noqa: F405  # Let bidirectional constraints handle this
+        elif bidirectional_constraints and rxn_id in mo.R_irr:
+            flux_var = mo.v_irr[rxn_id]
+        else:
+            flux_var = mo.v[rxn_id]
 
         # NESTED APPROACH: Handle each clause based on its structure
         # 1. Single genes (isoenzymes): use their individual capacity
@@ -657,9 +683,9 @@ def run_optimization(
                 if kl:
                     # For isoenzymes, use minimum kcat (most conservative)
                     kcat_val = min(kl)
-                    return kcat_val * mo.E[g]
+                    return kcat_val, mo.E[g]  # Return (kcat, enzyme_expr) tuple
                 else:
-                    return 0  # No kcat data available
+                    return None  # No kcat data available
 
             else:
                 # Multi-gene clause - this is an enzyme complex
@@ -688,7 +714,7 @@ def run_optimization(
                         complex_kcats.extend(kl)
 
                 if not complex_kcats:
-                    return 0  # No kcat data for this complex
+                    return None  # No kcat data for this complex
 
                 # For enzyme complexes:
                 # - Use average kcat across all subunits
@@ -703,36 +729,118 @@ def run_optimization(
                 # This is an approximation: in reality, we'd need min(E[g] for g in clause)
                 avg_enzyme = sum(mo.E[g] for g in clause) / len(clause)
 
-                return avg_kcat * avg_enzyme
+                return avg_kcat, avg_enzyme  # Return (kcat, enzyme_expr) tuple
 
         # Calculate total capacity as sum of all clause capacities (OR relationship)
         clause_capacities = []
         for clause in clauses:
-            capacity = get_clause_capacity(clause)
-            if capacity > 0:  # Only include clauses with valid kcat data
-                clause_capacities.append(capacity)
+            capacity_result = get_clause_capacity(clause)
+            if capacity_result is not None:  # Only include clauses with valid kcat data
+                kcat_val, enzyme_expr = capacity_result
+                clause_capacities.append(kcat_val * enzyme_expr)
 
         if not clause_capacities:
             mixed_skipped += 1
+            mixed_skip_reasons['no_capacities'] += 1
             return Constraint.Skip  # noqa: F405
 
         mixed_added += 1
-
-        # Choose appropriate flux variable based on bidirectional constraints
-        if bidirectional_constraints and rxn_id in mo.R_rev:
-            # For reversible reactions in bidirectional mode, we need separate constraints
-            # This is a simplification - ideally we'd have direction-specific mixed rules
-            mixed_skipped += 1
-            mixed_added -= 1  # Revert the counter
-            return Constraint.Skip  # noqa: F405  # Let bidirectional constraints handle this
-        elif bidirectional_constraints and rxn_id in mo.R_irr:
-            return mo.v_irr[rxn_id] <= sum(clause_capacities)
-        else:
-            return mo.v[rxn_id] <= sum(clause_capacities)
+        return flux_var <= sum(clause_capacities)
 
     # Only add mixed constraints if neither isoenzymes nor complexes are disabled
     if not isoenzymes_off and not complexes_off:
         m.kcat_mixed = Constraint(m.R, rule=mixed_rule)  # noqa: F405
+
+    # 6c2) Bidirectional MIXED constraints for reversible reactions
+    if bidirectional_constraints and not isoenzymes_off and not complexes_off:
+        def mixed_bidirectional_rule(mo, rxn_id, direction):
+            nonlocal bidirectional_mixed_added, bidirectional_mixed_skipped
+            clauses = dnf_clauses.get(rxn_id, [])
+            if len(clauses) <= 1:
+                bidirectional_mixed_skipped += 1
+                return Constraint.Skip  # noqa: F405
+
+            # Only handle if at least one clause has multiple genes (complex)
+            has_complex_clause = any(len(clause) > 1 for clause in clauses)
+            if not has_complex_clause:
+                bidirectional_mixed_skipped += 1
+                return Constraint.Skip  # noqa: F405
+
+            def get_bidirectional_clause_capacity(clause):
+                """Calculate capacity for a specific direction"""
+                if len(clause) == 1:
+                    # Single gene - isoenzyme alternative
+                    g = clause[0]
+                    kl = kcat_dict.get((rxn_id, g, direction), [])
+                    if kl:
+                        kcat_val = min(kl)
+                        # Use direction-specific enzyme allocation (Option C)
+                        if direction == 'forward':
+                            return kcat_val, mo.E_fwd[g, rxn_id]
+                        else:  # reverse
+                            return kcat_val, mo.E_rev[g, rxn_id]
+                    return None
+                else:
+                    # Multi-gene clause - enzyme complex
+                    complex_kcats = []
+                    for g in clause:
+                        kl = kcat_dict.get((rxn_id, g, direction), [])
+                        if kl:
+                            complex_kcats.extend(kl)
+                    
+                    if not complex_kcats:
+                        return None
+                    
+                    avg_kcat = sum(complex_kcats) / len(complex_kcats)
+                    
+                    # For complexes, use average of direction-specific allocations
+                    if direction == 'forward':
+                        avg_enzyme = sum(mo.E_fwd[g, rxn_id] for g in clause) / len(clause)
+                    else:  # reverse
+                        avg_enzyme = sum(mo.E_rev[g, rxn_id] for g in clause) / len(clause)
+                    
+                    return avg_kcat, avg_enzyme
+
+            # Calculate capacity for this direction
+            clause_capacities = []
+            for clause in clauses:
+                capacity_result = get_bidirectional_clause_capacity(clause)
+                if capacity_result is not None:
+                    kcat_val, enzyme_expr = capacity_result
+                    clause_capacities.append(kcat_val * enzyme_expr)
+
+            if not clause_capacities:
+                bidirectional_mixed_skipped += 1
+                return Constraint.Skip  # noqa: F405
+
+            bidirectional_mixed_added += 1
+            if direction == 'forward':
+                return mo.v_fwd[rxn_id] <= sum(clause_capacities)
+            else:  # reverse
+                return mo.v_rev[rxn_id] <= sum(clause_capacities)
+
+        # Create bidirectional mixed constraints
+        bidirectional_mixed_keys = []
+        for rxn_id in m.R_rev:
+            clauses = dnf_clauses.get(rxn_id, [])
+            if len(clauses) > 1 and any(len(clause) > 1 for clause in clauses):
+                # Check if we have mixed constraint data for both directions
+                has_data = {'forward': False, 'reverse': False}
+                for clause in clauses:
+                    for g in clause:
+                        if (rxn_id, g, 'forward') in kcat_dict:
+                            has_data['forward'] = True
+                        if (rxn_id, g, 'reverse') in kcat_dict:
+                            has_data['reverse'] = True
+                
+                if has_data['forward']:
+                    bidirectional_mixed_keys.append((rxn_id, 'forward'))
+                if has_data['reverse']:
+                    bidirectional_mixed_keys.append((rxn_id, 'reverse'))
+
+        if bidirectional_mixed_keys:
+            m.BM = Set(initialize=bidirectional_mixed_keys, dimen=2)  # noqa: F405
+            m.kcat_mixed_bidirectional = Constraint(m.BM, rule=mixed_bidirectional_rule)  # noqa: F405
 
     # 6d) Promiscuous enzymes
     def promis_rule(mo, g_id):
@@ -749,9 +857,17 @@ def run_optimization(
                     # We need to account for usage in both forward and reverse directions
 
                     # Forward direction usage
-                    if r_id in mo.R_rev or r_id in mo.R_irr:
+                    if r_id in mo.R_rev:
+                        # Reversible reaction: use v_fwd
                         for k in kcat_dict.get((r_id, g_id, 'forward'), []):
                             usage.append(mo.v_fwd[r_id] / k)
+                    elif r_id in mo.R_irr:
+                        # Irreversible reaction: use v_irr for forward direction
+                        for k in kcat_dict.get((r_id, g_id, 'forward'), []):
+                            usage.append(mo.v_irr[r_id] / k)
+                        # Also check for standard kcat data (non-directional)
+                        for k in kcat_dict.get((r_id, g_id), []):
+                            usage.append(mo.v_irr[r_id] / k)
 
                     # Reverse direction usage (only for reversible reactions)
                     if r_id in mo.R_rev:
@@ -782,16 +898,22 @@ def run_optimization(
             print("AND constraints (single/complex): DISABLED")
         else:
             print(f"AND constraints (single/complex):  {constraints_added:4d} added, {constraints_skipped:4d} skipped")
+            if constraints_skipped > 0:
+                print(f"  Skip reasons: {skip_reasons}")
 
         if isoenzymes_off:
             print("OR/ISO constraints (pure isozymes): DISABLED")
         else:
             print(f"OR/ISO constraints (pure isozymes): {iso_added:4d} added, {iso_skipped:4d} skipped")
+            if iso_skipped > 0:
+                print(f"  Skip reasons: {iso_skip_reasons}")
 
         if isoenzymes_off or complexes_off:
             print("MIXED OR+AND constraints: DISABLED")
         else:
             print(f"MIXED OR+AND constraints:          {mixed_added:4d} added, {mixed_skipped:4d} skipped")
+            if mixed_skipped > 0:
+                print(f"  Skip reasons: {mixed_skip_reasons}")
 
         if promiscuous_off:
             print("Promiscuous enzyme constraints: DISABLED")
@@ -800,6 +922,14 @@ def run_optimization(
 
         if bidirectional_constraints:
             print("Bidirectional constraints: ENABLED (integrated with and_rule and iso constraints)")
+            print(f"Bidirectional ISO constraints:     {bidirectional_iso_added:4d} added, {bidirectional_iso_skipped:4d} skipped")
+            print(f"Bidirectional MIXED constraints:   {bidirectional_mixed_added:4d} added, {bidirectional_mixed_skipped:4d} skipped")
+            
+            # Calculate total bidirectional coverage
+            total_reversible = len(m.R_rev) if hasattr(m, 'R_rev') else 0
+            bidirectional_covered = bidirectional_iso_added + bidirectional_mixed_added
+            print(f"Bidirectional coverage:            {bidirectional_covered}/{total_reversible*2} direction-constraints")
+            print(f"  (Expected max: {total_reversible} reversible × 2 directions)")
         else:
             print("Bidirectional constraints: DISABLED")
 
@@ -807,11 +937,61 @@ def run_optimization(
             (constraints_added if not multi_enzyme_off else 0) +
             (iso_added if not isoenzymes_off else 0) +
             (mixed_added if not (isoenzymes_off or complexes_off) else 0) +
-            (promis_added if not promiscuous_off else 0)
+            (promis_added if not promiscuous_off else 0) +
+            (bidirectional_iso_added if bidirectional_constraints else 0) +
+            (bidirectional_mixed_added if bidirectional_constraints else 0)
         )
         print(f"{'='*60}")
         print(f"Total active enzyme constraints:   {total_active:4d}")
         print(f"{'='*60}\n")
+        
+        # Enhanced diagnostic for understanding gaps
+        if bidirectional_constraints:
+            print("BIDIRECTIONAL CONSTRAINT ANALYSIS:")
+            print(f"  Reversible reactions identified:   {len(m.R_rev)}")
+            print(f"  Irreversible reactions:            {len(m.R_irr)}")
+            
+            # Analyze what types of GPR structures exist
+            gpr_types = {'single': 0, 'pure_iso': 0, 'mixed': 0, 'none': 0}
+            for rxn_id in m.R_rev:
+                clauses = dnf_clauses.get(rxn_id, [])
+                if not clauses:
+                    gpr_types['none'] += 1
+                elif len(clauses) == 1 and len(clauses[0]) == 1:
+                    gpr_types['single'] += 1
+                elif len(clauses) > 1 and all(len(c) == 1 for c in clauses):
+                    gpr_types['pure_iso'] += 1
+                elif any(len(c) > 1 for c in clauses):
+                    gpr_types['mixed'] += 1
+            
+            print("  GPR structure breakdown for reversible reactions:")
+            print(f"    Single gene:     {gpr_types['single']:4d} (handled by AND constraints)")
+            print(f"    Pure isoenzymes: {gpr_types['pure_iso']:4d} (should be bidirectional ISO)")
+            print(f"    Mixed complexes: {gpr_types['mixed']:4d} (should be bidirectional MIXED)")
+            print(f"    No GPR:          {gpr_types['none']:4d} (no constraints possible)")
+            
+            expected_bidirectional = gpr_types['pure_iso'] * 2 + gpr_types['mixed'] * 2  # *2 for forward+reverse
+            actual_bidirectional = bidirectional_iso_added + bidirectional_mixed_added
+            print(f"  Expected bidirectional constraints: {expected_bidirectional}")
+            print(f"  Actual bidirectional constraints:   {actual_bidirectional}")
+            if expected_bidirectional > actual_bidirectional:
+                print(f"  ⚠️  Gap: {expected_bidirectional - actual_bidirectional} missing bidirectional constraints!")
+            print()
+        
+        # Diagnostic: Check if we actually have any constraints
+        if total_active == 0:
+            print("WARNING: NO ENZYME CONSTRAINTS WERE CREATED!")
+            print("This means the optimization is unconstrained by enzymes.")
+            print("Checking constraint generation issues:")
+            print(f"  - kcat_dict entries: {len(kcat_dict)}")
+            print(f"  - gene_sequences_dict entries: {len(gene_sequences_dict) if gene_sequences_dict else 0}")
+            print(f"  - dnf_clauses entries: {len(dnf_clauses)}")
+            if len(kcat_dict) > 0:
+                print(f"  - Sample kcat_dict key: {list(kcat_dict.keys())[0]}")
+            if len(dnf_clauses) > 0:
+                print(f"  - Sample dnf_clauses: {list(dnf_clauses.items())[0]}")
+        else:
+            print(f"✓ Successfully created {total_active} enzyme constraints")
 
     # 7) Total enzyme pool / ratio
     # print("Step 7: Adding enzyme pool constraints...")
@@ -1128,11 +1308,18 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
             print(f"Created bidirectional kcat dictionary with {len(kcat_dict)} entries:")
             print(f"  Forward direction: {forward_count}")
             print(f"  Reverse direction: {reverse_count}")
+            if len(kcat_dict) > 0:
+                print(f"  Sample kcat keys: {list(kcat_dict.keys())[:3]}")
     else:
         # Build standard kcat_dict using (Reactions, Single_gene) as keys
         # Group by (Reactions, Single_gene) and take the max kcat if duplicates exist
         grouped = valid_rows.groupby(['Reactions', 'Single_gene'])[kcat_col].max()
         kcat_dict = {key: [value] for key, value in grouped.items()}
+
+        if verbose:
+            print(f"Created standard kcat dictionary with {len(kcat_dict)} entries")
+            if len(kcat_dict) > 0:
+                print(f"  Sample kcat keys: {list(kcat_dict.keys())[:3]}")
 
     # Build gene_sequences_dict (take first sequence for each gene)
     gene_seq_grouped = valid_rows.groupby('Single_gene')['SEQ'].first()
@@ -1141,8 +1328,11 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
     if verbose:
         if len(kcat_dict) > 0:
             print(f"Created kcat dictionary with {len(kcat_dict)} entries")
+            if not bidirectional_constraints and len(kcat_dict) > 0:
+                print(f"  Sample kcat keys: {list(kcat_dict.keys())[:3]}")
         else:
             print("WARNING: No valid kcat data found")
+        print(f"Created gene_sequences_dict with {len(gene_sequences_dict)} entries")
 
     solution_value, df_FBA, gene_sequences_dict, m = run_optimization(
         model=model,
@@ -1160,7 +1350,8 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
         solver_name=solver_name,
         medium=medium,
         medium_upper_bound=medium_upper_bound,
-        bidirectional_constraints=bidirectional_constraints
+        bidirectional_constraints=bidirectional_constraints,
+        verbose=verbose  # Make sure verbose is passed through
     )
 
     # Create descriptive filename and save results if requested

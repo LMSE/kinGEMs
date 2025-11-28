@@ -246,12 +246,10 @@ def run_fva_analysis(model, processed_df, biomass_reaction, enzyme_upper_bound,
     fva_config = fva_config or {}
     use_parallel = fva_config.get('parallel', False)
     n_workers = fva_config.get('workers', None)
-    opt_ratio = fva_config.get('opt_ratio', 0.9)
 
     fva_results_path = os.path.join(tuning_results_dir, f"{organism_strain_GEMname}_fva_results.csv")
     fva_plot_path = os.path.join(tuning_results_dir, f"{organism_strain_GEMname}_fva_flux_range_plot.png")
     fva_cumulative_path = os.path.join(tuning_results_dir, f"{organism_strain_GEMname}_fva_cumulative_plot.png")
-    fva_baseline_results_path = os.path.join(tuning_results_dir, f"{organism_strain_GEMname}_cobra_fva_results.csv")
 
     # Run kinGEMs FVA
     if use_parallel:
@@ -262,7 +260,6 @@ def run_fva_analysis(model, processed_df, biomass_reaction, enzyme_upper_bound,
             biomass_reaction=biomass_reaction,
             output_file=fva_results_path,
             enzyme_upper_bound=enzyme_upper_bound,
-            opt_ratio=opt_ratio,
             n_workers=n_workers
         )
     else:
@@ -272,8 +269,7 @@ def run_fva_analysis(model, processed_df, biomass_reaction, enzyme_upper_bound,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             output_file=fva_results_path,
-            enzyme_upper_bound=enzyme_upper_bound,
-            opt_ratio=opt_ratio
+            enzyme_upper_bound=enzyme_upper_bound
         )
     print(f"  kinGEMs FVA completed: {len(fva_results)} reactions analyzed")
 
@@ -286,9 +282,7 @@ def run_fva_analysis(model, processed_df, biomass_reaction, enzyme_upper_bound,
         "Max Solutions": cobra_fva_results['maximum'],
         "Solution Biomass": [model.slim_optimize()] * len(cobra_fva_results)
     })
-    
-    cobra_fva_df.to_csv(fva_baseline_results_path, index=False)
-    print(f"  COBRApy FVA completed: {len(cobra_fva_df)} reactions analyzed and results saved to {fva_baseline_results_path}")
+    print(f"  COBRApy FVA completed: {len(cobra_fva_df)} reactions analyzed")
 
     # Generate plots
     print("  Generating FVA plots...")
@@ -454,7 +448,6 @@ def main():
         fva_config = config.get('fva', {})
         print("\nFVA Settings:")
         print(f"  Parallel execution: {fva_config.get('parallel', False)}")
-        print(f"  Biomass constraint ratio: {fva_config.get('opt_ratio', 0.9)}")
         if fva_config.get('parallel'):
             print(f"  Workers: {fva_config.get('workers', 'auto')}")
             print(f"  Method: {fva_config.get('method', 'dask')}")
@@ -469,7 +462,6 @@ def main():
     print(f"  Max unchanged iterations: {sa_config.get('max_unchanged_iterations', 5)}")
     print(f"  Change threshold: {sa_config.get('change_threshold', 0.009)}")
     print(f"  Biomass goal: {sa_config.get('biomass_goal', 0.5)}")
-    print(f"  Top enzymes to tune: {sa_config.get('n_top_enzymes', 65)}")
 
     # Print Biolog config if enabled
     if enable_biolog:
@@ -582,35 +574,14 @@ def main():
     # === Step 4: Optimization ===
     print("\n=== Step 4: Running optimization ===")
 
-    # Extract medium constraints from config 
-    medium_temp = config.get('medium', None)
-    medium_upper_bound_temp = config.get('medium_upper_bound', True)
     # First run standard COBRApy optimization for comparison
     print("  Running standard COBRApy FBA (no enzyme constraints)...")
-    
-    # Apply medium constraints if specified
-    if medium_temp is not None:
-        mode = "fixed fluxes" if medium_upper_bound_temp else "max uptake rates"
-        print(f"  Applying medium conditions ({mode}) to COBRApy model:")
-        for rxn_id, flux_value in medium_temp.items():
-            try:
-                rxn = model.reactions.get_by_id(rxn_id)
-                rxn.lower_bound = flux_value
-                if medium_upper_bound_temp:
-                    rxn.upper_bound = flux_value
-                    print(f"    Fixed {rxn_id}: {flux_value}")
-                else:
-                    print(f"    Set {rxn_id} lower bound: {flux_value} (upper: {rxn.upper_bound})")
-            except KeyError:
-                print(f"    Warning: Reaction '{rxn_id}' not found in model")
-    
     cobra_solution = model.optimize()
     cobra_biomass = cobra_solution.objective_value
     print(f"    COBRApy biomass: {cobra_biomass:.4f}")
 
     # Now run enzyme-constrained optimization
     print("  Running kinGEMs enzyme-constrained optimization...")
-    
     (solution_value, df_FBA, gene_sequences_dict, _) = run_optimization_with_dataframe(
         model=model,
         processed_df=processed_data,
@@ -626,9 +597,7 @@ def main():
         save_results=False,
         print_reaction_conditions=True,
         verbose=False,
-        solver_name=solver_name,
-        medium=medium_temp,
-        medium_upper_bound=medium_upper_bound_temp
+        solver_name=solver_name
     )
     print(f"    kinGEMs biomass: {solution_value:.4f}")
 
@@ -659,11 +628,7 @@ def main():
     max_unchanged_iterations = sa_config.get('max_unchanged_iterations', 5)
     change_threshold = sa_config.get('change_threshold', 0.009)
     biomass_goal = sa_config.get('biomass_goal', 0.5)
-    n_top_enzymes = sa_config.get('n_top_enzymes', 65)
     verbose = sa_config.get('verbose', False)
-    medium = config.get('medium', None)
-    medium_upper_bound = config.get('medium_upper_bound', True)
-
 
     print("  Configuration:")
     print(f"    - Temperature: {temperature}")
@@ -672,10 +637,6 @@ def main():
     print(f"    - Max unchanged iterations: {max_unchanged_iterations}")
     print(f"    - Change threshold: {change_threshold}")
     print(f"    - Biomass goal: {biomass_goal}")
-    print(f"    - Top enzymes to tune: {n_top_enzymes}")
-    if medium:
-        mode = "fixed fluxes" if medium_upper_bound else "max uptake rates"
-        print(f"    - Medium conditions: {len(medium)} reactions ({mode})")
     print("  Starting optimization...\n")
 
     kcat_dict, top_targets, df_new, iterations, biomasses, df_FBA = simulated_annealing(
@@ -686,16 +647,13 @@ def main():
         gene_sequences_dict=gene_sequences_dict,
         output_dir=tuning_results_dir,
         enzyme_fraction=enzyme_upper_bound,
-        n_top_enzymes=n_top_enzymes,
         temperature=temperature,
         cooling_rate=cooling_rate,
         min_temperature=min_temperature,
         max_iterations=max_iterations,
         max_unchanged_iterations=max_unchanged_iterations,
         change_threshold=change_threshold,
-        verbose=verbose,
-        medium=medium,
-        medium_upper_bound=medium_upper_bound
+        verbose=verbose
     )
 
     improvement = (biomasses[-1] - biomasses[0]) / biomasses[0] * 100 if biomasses[0] > 0 else 0
@@ -741,9 +699,6 @@ def main():
         fva_config = config.get('fva', {})
         run_fva_analysis(model, df_new, biomass_reaction, enzyme_upper_bound,
                         tuning_results_dir, model_name, fva_config)
-
-        run_fva_analysis(model, processed_data, biomass_reaction, enzyme_upper_bound,
-                        tuning_results_dir, f"{model_name}_pre_tuning", fva_config)
 
     if enable_biolog:
         biolog_config = config.get('biolog_validation', {})
