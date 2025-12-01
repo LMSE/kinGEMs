@@ -25,6 +25,7 @@ Config File Format:
 """
 
 from datetime import datetime
+import gc  # For garbage collection
 import json
 import logging
 import os
@@ -582,6 +583,13 @@ def main():
 
     # Now run enzyme-constrained optimization
     print("  Running kinGEMs enzyme-constrained optimization...")
+
+    # Optimize performance: disable bidirectional constraints if not needed
+    # This can significantly reduce memory usage and solve time
+    use_bidirectional = config.get('bidirectional_constraints', True)
+    if not use_bidirectional:
+        print("    Using standard constraints (bidirectional disabled for speed)")
+
     (solution_value, df_FBA, gene_sequences_dict, _) = run_optimization_with_dataframe(
         model=model,
         processed_df=processed_data,
@@ -596,8 +604,9 @@ def main():
         output_dir=None,
         save_results=False,
         print_reaction_conditions=True,
-        verbose=False,
-        solver_name=solver_name
+        verbose=False,  # Enable detailed timing output
+        solver_name=solver_name,
+        bidirectional_constraints=use_bidirectional  # Add performance option
     )
     print(f"    kinGEMs biomass: {solution_value:.4f}")
 
@@ -607,6 +616,11 @@ def main():
     print(f"    Standard FBA:           {cobra_biomass:.4f}")
     print(f"    Enzyme-constrained FBA: {solution_value:.4f}")
     print(f"    Reduction due to enzyme budget: {reduction:.1f}%")
+
+    # Memory cleanup after optimization
+    print("  Cleaning up optimization memory...")
+    del df_FBA  # Large result dataframe no longer needed
+    gc.collect()  # Force garbage collection
 
     # For ModelSEED models, we need to let the optimization system handle constraints
     # Don't manually add enzyme constraints - let simulated annealing use the optimization framework

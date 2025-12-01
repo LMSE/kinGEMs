@@ -1,18 +1,18 @@
 Parallel Validation Jobs
 ========================
-Submitted: Wed Nov 26 09:29:24 PST 2025
+Submitted: Sun Nov 30 20:31:57 PST 2025
 
 Job IDs:
-  Baseline:     12667548
-  Pre-tuning:   12667549
-  Post-tuning:  12667550
-  Compilation:  12667551
+  Baseline:     13320210
+  Pre-tuning:   13320211
+  Post-tuning:  13320212
+  Compilation:  13320213
 
 Log Files:
-  Baseline:     logs/baseline_12667548.out
-  Pre-tuning:   logs/pretuning_12667549.out
-  Post-tuning:  logs/posttuning_12667550.out
-  Compilation:  logs/compile_12667551.out
+  Baseline:     logs/baseline_13320210.out
+  Pre-tuning:   logs/pretuning_13320211.out
+  Post-tuning:  logs/posttuning_13320212.out
+  Compilation:  logs/compile_13320213.out
 
 Monitor Command:
-  squeue -j 12667548,12667549,12667550,12667551
+  squeue -j 13320210,13320211,13320212,13320213

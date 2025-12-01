@@ -13,11 +13,11 @@ import warnings
 from Bio.Data.IUPACData import protein_letters
 from Bio.SeqUtils import molecular_weight
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
-import matplotlib.pyplot as plt
 import pandas as pd
 
 from ..config import ensure_dir_exists
 from ..dataset import annotate_model_with_kcat_and_gpr
+from ..plots import plot_kcat_comparison
 from ..plots import plot_annealing_progress
 from .optimize import run_optimization_with_dataframe
 
@@ -30,8 +30,6 @@ try:
     gurobipy.setParam('OutputFlag', 0)
 except ImportError:
     pass
-
-
 
 
 def simulated_annealing(
@@ -55,7 +53,7 @@ def simulated_annealing(
 ):
     """
     Use simulated annealing to tune kcat values for improved biomass production.
-    
+
     Parameters
     ----------
     model : cobra.Model
@@ -92,7 +90,7 @@ def simulated_annealing(
         Growth medium composition
     medium_upper_bound : bool or float, optional
         Upper bound for medium exchanges (default: False)
-        
+
     Returns
     -------
     tuple
@@ -212,6 +210,8 @@ def simulated_annealing(
     current_solution = top_targets['kcat_mean'].tolist()
     stds             = top_targets['kcat_std'].fillna(0.1).tolist()
 
+    # Store original data for before/after comparison
+    original_processed_data = processed_data.copy()
     df_new = processed_data.copy()
     current_biomass = biomass
     best_solution   = current_solution[:]
@@ -366,13 +366,15 @@ def simulated_annealing(
             best_df,
             iterations,
             biomasses,
-            df_FBA
+            df_FBA,
+            original_processed_data=original_processed_data
         )
 
     return kcat_dict, top_targets, best_df, iterations, biomasses, df_FBA
 
 
-def save_annealing_results(output_dir, kcat_dict, df_enzyme_sorted, df_new, iterations, biomasses, df_FBA, prefix=""):
+def save_annealing_results(output_dir, kcat_dict, df_enzyme_sorted, df_new, iterations, biomasses, df_FBA,
+                         original_processed_data=None, prefix=""):
     """
     Save the results of the simulated annealing process.
 
@@ -392,6 +394,8 @@ def save_annealing_results(output_dir, kcat_dict, df_enzyme_sorted, df_new, iter
         List of biomass values at each iteration
     df_FBA : pandas.DataFrame
         DataFrame with FBA results
+    original_processed_data : pandas.DataFrame, optional
+        Original processed data before optimization for comparison plots
     prefix : str, optional
         Prefix for output filenames
     """
@@ -415,6 +419,15 @@ def save_annealing_results(output_dir, kcat_dict, df_enzyme_sorted, df_new, iter
     df_iterations = pd.DataFrame({"Iteration": iterations, "Biomass": biomasses})
     df_iterations.to_csv(os.path.join(output_dir, f"{prefix}iterations.csv"), index=False)
 
-    # Create and save plot
+    # Create and save annealing progress plot
     plot_annealing_progress(iterations, biomasses,
                            output_path=os.path.join(output_dir, f"{prefix}annealing_progress.png"))
+
+    # Create and save kcat comparison plot if original data is available
+    if original_processed_data is not None:
+        plot_kcat_comparison(
+            original_df=original_processed_data,
+            optimized_df=df_new,
+            top_targets=df_enzyme_sorted,
+            output_path=os.path.join(output_dir, f"{prefix}kcat_comparison.png")
+        )

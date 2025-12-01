@@ -4,9 +4,9 @@
 # ---------------------------------------------------------------------
 #SBATCH --job-name=kinGEMs_direct
 #SBATCH --account=def-mahadeva
-#SBATCH --cpus-per-task=8
-#SBATCH --time=0-10:00:00
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=10
+#SBATCH --time=1-10:00:00
+#SBATCH --mem=128G
 #SBATCH --output=logs/pipeline_direct_%j.out
 #SBATCH --error=logs/pipeline_direct_%j.err
 #SBATCH --mail-user=ranamoneim@gmail.com

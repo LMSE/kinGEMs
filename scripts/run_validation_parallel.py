@@ -21,6 +21,7 @@ Modes:
 
 import argparse
 from datetime import datetime
+import gc  # For memory cleanup
 import json
 import logging
 import os
@@ -62,10 +63,10 @@ def load_config(config_path):
 def simulate_wild_type_growth(model_adj, name_carbon_model_matched_adj,
                               medium_ex_inds, carbon_ex_inds):
     """Simulate wild-type growth (no gene knockouts) for each carbon source.
-    
+
     This provides the reference growth rates needed to convert mutant growth
     rates to fitness values (log2 ratios).
-    
+
     Parameters
     ----------
     model_adj : cobra.Model
@@ -76,7 +77,7 @@ def simulate_wild_type_growth(model_adj, name_carbon_model_matched_adj,
         Indices of medium exchange reactions
     carbon_ex_inds : list
         Indices of carbon source exchange reactions
-        
+
     Returns
     -------
     numpy.ndarray
@@ -84,44 +85,46 @@ def simulate_wild_type_growth(model_adj, name_carbon_model_matched_adj,
     """
     n_carbons = len(name_carbon_model_matched_adj)
     wild_type_growth = np.zeros(n_carbons)
-    
+
     # Set medium
     for e in medium_ex_inds:
         if e != -1:
             model_adj.exchanges[e].lower_bound = -1000
-    
+
     print(f"  Calculating wild-type growth for {n_carbons} carbon sources...")
-    
+
     for e, carbon in enumerate(name_carbon_model_matched_adj):
         print(f"  Wild-type growth progress: {e+1}/{n_carbons}", end='\r')
-        
+
         # Check if this carbon source was already tested
         if carbon in name_carbon_model_matched_adj[:e]:
             e_found = name_carbon_model_matched_adj[:e].index(carbon)
             wild_type_growth[e] = wild_type_growth[e_found]
             continue
-        
+
         # Set carbon source
         if carbon_ex_inds[e] != -1:
             model_adj.exchanges[carbon_ex_inds[e]].lower_bound = -10
-        
+
         # Optimize (NO gene knockouts)
         solution = model_adj.slim_optimize()
         if np.isnan(solution):
             solution = 0
         wild_type_growth[e] = solution
-        
+
         # Reset carbon source
         if carbon_ex_inds[e] != -1:
             model_adj.exchanges[carbon_ex_inds[e]].lower_bound = 0
-        
+
         if (e + 1) % 5 == 0:
             print(f"  Wild-type growth progress: {e+1}/{n_carbons} carbon sources completed")
-    
+            # Periodic memory cleanup
+            gc.collect()
+
     print(f"\n  Wild-type growth calculation complete ({n_carbons} carbon sources).")
     print(f"  Mean growth rate: {np.mean(wild_type_growth):.6f}")
     print(f"  Range: {np.min(wild_type_growth):.6f} to {np.max(wild_type_growth):.6f}")
-    
+
     return wild_type_growth
 
 
@@ -129,10 +132,10 @@ def simulate_wild_type_growth_kingems(model_adj, name_carbon_model_matched_adj,
                                       medium_ex_inds, carbon_ex_inds,
                                       processed_df, objective_reaction, enzyme_upper_bound):
     """Simulate wild-type growth for kinGEMs model (WITH enzyme constraints, but no gene knockouts).
-    
+
     This calculates the reference growth rates for kinGEMs models that have enzyme
     constraints applied, which is needed to convert mutant growth rates to fitness values.
-    
+
     Parameters
     ----------
     model_adj : cobra.Model
@@ -149,7 +152,7 @@ def simulate_wild_type_growth_kingems(model_adj, name_carbon_model_matched_adj,
         Objective reaction ID
     enzyme_upper_bound : float
         Upper bound for enzyme concentration
-        
+
     Returns
     -------
     numpy.ndarray
@@ -157,33 +160,33 @@ def simulate_wild_type_growth_kingems(model_adj, name_carbon_model_matched_adj,
     """
     n_carbons = len(name_carbon_model_matched_adj)
     wild_type_growth = np.zeros(n_carbons)
-    
+
     # Ensure kcat_mean is numeric
     if 'kcat_mean' in processed_df.columns:
         processed_df['kcat_mean'] = processed_df['kcat_mean'].apply(
             lambda x: float(x) if isinstance(x, str) and x.replace('.','',1).isdigit() else x)
-    
+
     # Set medium
     for e in medium_ex_inds:
         if e != -1:
             model_adj.exchanges[e].lower_bound = -1000
-    
+
     print(f"  Calculating kinGEMs wild-type growth for {n_carbons} carbon sources...")
     print("  (WITH enzyme constraints, NO gene knockouts)")
-    
+
     for e, carbon in enumerate(name_carbon_model_matched_adj):
         print(f"  kinGEMs wild-type progress: {e+1}/{n_carbons}", end='\r')
-        
+
         # Check if this carbon source was already tested
         if carbon in name_carbon_model_matched_adj[:e]:
             e_found = name_carbon_model_matched_adj[:e].index(carbon)
             wild_type_growth[e] = wild_type_growth[e_found]
             continue
-        
+
         # Set carbon source
         if carbon_ex_inds[e] != -1:
             model_adj.exchanges[carbon_ex_inds[e]].lower_bound = -10
-        
+
         # Optimize WITH enzyme constraints, but NO gene knockouts
         # No gene knockout needed - just optimize with enzyme constraints
         try:
@@ -206,26 +209,32 @@ def simulate_wild_type_growth_kingems(model_adj, name_carbon_model_matched_adj,
             )
             # Extract objective value from tuple return (solution_value, df_FBA, gene_sequences_dict, _)
             if isinstance(solution, tuple):
-                solution = solution[0]
+                obj_value = solution[0]
+                # Clean up large result objects from optimization
+                del solution  # Delete the tuple containing large arrays
+                gc.collect()  # Force garbage collection after optimization
+                solution = obj_value
             if solution is None or np.isnan(solution):
                 solution = 0
         except Exception as ex:
             print(f"\n  Warning: Optimization failed for carbon {carbon}: {ex}")
             solution = 0
-        
+
         wild_type_growth[e] = solution
-        
+
         # Reset carbon source
         if carbon_ex_inds[e] != -1:
             model_adj.exchanges[carbon_ex_inds[e]].lower_bound = 0
-        
+
         if (e + 1) % 5 == 0:
             print(f"  kinGEMs wild-type progress: {e+1}/{n_carbons} carbon sources completed")
-    
+            # Periodic memory cleanup after optimizations
+            gc.collect()
+
     print(f"\n  kinGEMs wild-type growth calculation complete ({n_carbons} carbon sources).")
     print(f"  Mean growth rate: {np.mean(wild_type_growth):.6f}")
     print(f"  Range: {np.min(wild_type_growth):.6f} to {np.max(wild_type_growth):.6f}")
-    
+
     return wild_type_growth
 
 
@@ -269,6 +278,8 @@ def simulate_baseline_only(model_adj, name_genes_matched_adj, name_carbon_model_
 
         if (e + 1) % 5 == 0:
             print(f"  Baseline GEM progress: {e+1}/{n_carbons} carbon sources completed")
+            # Periodic memory cleanup
+            gc.collect()
 
     print(f"\n  Baseline GEM simulation complete ({n_genes} genes × {n_carbons} carbon sources).")
     return baseline_GEM
@@ -276,7 +287,7 @@ def simulate_baseline_only(model_adj, name_genes_matched_adj, name_carbon_model_
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--mode', required=True, 
+    parser.add_argument('--mode', required=True,
                        choices=['wildtype', 'baseline', 'pretuning', 'posttuning'],
                        help='Validation mode to run')
     parser.add_argument('--config', required=True, help='Path to configuration JSON file')
@@ -325,7 +336,7 @@ def main():
 
     # Set solver
     solver_name = config.get('solver', None)
-    
+
     # Verify Pyomo can find CPLEX if requested
     if solver_name and solver_name.lower() == 'cplex':
         try:
@@ -338,7 +349,7 @@ def main():
                 print("  Pyomo will fall back to GLPK (slower)")
         except Exception as e:
             print(f"  ⚠️  Could not verify CPLEX in Pyomo: {e}")
-    
+
     if solver_name:
         try:
             model.solver = solver_name
@@ -408,6 +419,11 @@ def main():
     print(f"  Matched genes: {len(name_genes_matched_adj)}")
     print(f"  Carbon sources: {len(name_carbon_model_matched_adj)}")
 
+    # Clean up intermediate data structures no longer needed
+    del name_genes_matched, name_carbon_experiment_matched, name_carbon_model_matched, data_fitness_matched
+    del name_medium_model, name_carbon_model, name_carbon_experiment, data_experiments, data_genes, data_fitness
+    gc.collect()
+
     # === Step 3: Run Simulation Based on Mode ===
     print(f"\n=== Step 3: Running {args.mode.upper()} simulation ===")
 
@@ -424,7 +440,7 @@ def main():
         output_file = os.path.join(args.output, 'wild_type_growth.npy')
         np.save(output_file, wild_type_growth)
         print(f"  Saved: {output_file}")
-        
+
         # Also save as text for easy inspection
         output_txt = os.path.join(args.output, 'wild_type_growth.txt')
         with open(output_txt, 'w') as f:
@@ -440,9 +456,13 @@ def main():
             f.write(f"# Max:  {np.max(wild_type_growth):.6f}\n")
         print(f"  Saved: {output_txt}")
 
+        # Memory cleanup
+        del wild_type_growth
+        gc.collect()
+
     elif args.mode == 'baseline':
         print("Running Baseline GEM (no enzyme constraints)...")
-        
+
         # First, calculate wild-type growth for baseline model
         print("\n  Calculating baseline wild-type growth...")
         baseline_wildtype = simulate_wild_type_growth(
@@ -451,12 +471,12 @@ def main():
             medium_ex_inds=medium_ex_inds,
             carbon_ex_inds=carbon_ex_inds
         )
-        
+
         # Save baseline wild-type growth
         wt_file = os.path.join(args.output, 'baseline_wildtype.npy')
         np.save(wt_file, baseline_wildtype)
         print(f"  Saved: {wt_file}")
-        
+
         # Now run gene knockout simulations
         baseline_GEM = simulate_baseline_only(
             model_adj=model_adj,
@@ -470,6 +490,10 @@ def main():
         output_file = os.path.join(args.output, 'baseline_GEM.npy')
         np.save(output_file, baseline_GEM)
         print(f"  Saved: {output_file}")
+
+        # Memory cleanup
+        del baseline_GEM, baseline_wildtype
+        gc.collect()
 
     elif args.mode == 'pretuning':
         if not pre_tuning_data_path or not os.path.exists(pre_tuning_data_path):
@@ -490,7 +514,7 @@ def main():
             objective_reaction=objective_reaction,
             enzyme_upper_bound=enzyme_upper_bound
         )
-        
+
         # Save pre-tuning wild-type growth
         wt_file = os.path.join(args.output, 'pretuning_wildtype.npy')
         np.save(wt_file, pretuning_wildtype)
@@ -532,6 +556,10 @@ def main():
         np.save(output_file, pre_tuning_GEM)
         print(f"  Saved: {output_file}")
 
+        # Memory cleanup
+        del pre_tuning_df, pre_tuning_GEM, pretuning_wildtype
+        gc.collect()
+
     elif args.mode == 'posttuning':
         if not post_tuning_data_path or not os.path.exists(post_tuning_data_path):
             print(f"  ⚠️  Post-tuning data not found: {post_tuning_data_path}")
@@ -551,7 +579,7 @@ def main():
             objective_reaction=objective_reaction,
             enzyme_upper_bound=enzyme_upper_bound
         )
-        
+
         # Save post-tuning wild-type growth
         wt_file = os.path.join(args.output, 'posttuning_wildtype.npy')
         np.save(wt_file, posttuning_wildtype)
@@ -593,6 +621,10 @@ def main():
         np.save(output_file, post_tuning_GEM)
         print(f"  Saved: {output_file}")
 
+        # Memory cleanup
+        del post_tuning_df, post_tuning_GEM, posttuning_wildtype
+        gc.collect()
+
     # Save experimental data and metadata
     exp_file = os.path.join(args.output, 'experimental_fitness.npy')
     meta_file = os.path.join(args.output, f'{args.mode}_metadata.json')
@@ -616,6 +648,14 @@ def main():
     with open(meta_file, 'w') as f:
         json.dump(metadata, f, indent=2)
     print(f"  Saved: {meta_file}")
+
+    # Final memory cleanup
+    del model_adj, data_fitness_matched_adj
+    if 'name_genes_matched_adj' in locals():
+        del name_genes_matched_adj
+    if 'name_carbon_model_matched_adj' in locals():
+        del name_carbon_model_matched_adj
+    gc.collect()
 
     print("\n" + "="*70)
     print(f"=== {args.mode.upper()} Validation Complete ===")

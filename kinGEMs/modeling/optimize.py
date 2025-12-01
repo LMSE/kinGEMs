@@ -11,7 +11,10 @@ import logging
 import logging as pyomo_logging
 import math
 import os
+
+import psutil  # For memory monitoring
 import re
+import time  # For timing measurements
 import warnings
 
 from Bio.SeqUtils import molecular_weight
@@ -47,6 +50,29 @@ def _tokenize_gpr(rule):
     tokens = re.findall(token_spec, rule)
     # Normalize 'and'/'or' to lowercase for parser, keep gene IDs as-is
     return [t.lower() if t.lower() in ('and', 'or') else t for t in tokens]
+
+
+def _get_memory_usage():
+    """Get current memory usage in MB."""
+    try:
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / 1024 / 1024  # Convert bytes to MB
+    except Exception:
+        return -1  # Return -1 if memory monitoring fails
+
+
+def _print_step_timing(step_name, start_time, verbose=True):
+    """Print timing and memory info for a step."""
+    if not verbose:
+        return
+
+    elapsed = time.time() - start_time
+    memory_mb = _get_memory_usage()
+
+    if memory_mb > 0:
+        print(f"  ✓ {step_name}: {elapsed:.2f}s (Memory: {memory_mb:.1f} MB)")
+    else:
+        print(f"  ✓ {step_name}: {elapsed:.2f}s")
 
 
 def _parse_gpr_to_dnf(tokens):
@@ -118,9 +144,24 @@ def run_optimization(
     Returns: sol_val, df_FBA, gene_sequences_dict, model
     """
 
+    # Initialize timing
+    overall_start = time.time()
+    step_start = time.time()
+
+    if verbose:
+        initial_memory = _get_memory_usage()
+        print(f"\n{'='*60}")
+        print("ENZYME-CONSTRAINED OPTIMIZATION - PERFORMANCE MONITORING")
+        print(f"{'='*60}")
+        if initial_memory > 0:
+            print(f"Initial memory usage: {initial_memory:.1f} MB")
+        print(f"Solver: {solver_name}")
+        print(f"Enzyme upper bound: {enzyme_upper_bound}")
+        print(f"Bidirectional constraints: {bidirectional_constraints}")
+        print()
 
     # 1) Load COBRA model
-    # print("Step 1: Loading COBRA model...")
+    step_start = time.time()
     if isinstance(model, str):
         mod = (
             cb.io.read_sbml_model(model)
@@ -129,9 +170,11 @@ def run_optimization(
         )
     else:
         mod = model
+    _print_step_timing("Step 1: Load COBRA model", step_start, verbose)
 
     # 1a) Apply medium conditions if provided
     if medium is not None:
+        step_start = time.time()
         for rxn_id, flux_value in medium.items():
             try:
                 rxn = mod.reactions.get_by_id(rxn_id)
@@ -145,17 +188,19 @@ def run_optimization(
                         print(f"  Set {rxn_id}: lower={flux_value}, upper={rxn.upper_bound}")
             except KeyError:
                 print(f"  Warning: Reaction provided '{rxn_id}' was not found in model")
+        _print_step_timing("Step 1a: Apply medium conditions", step_start, verbose)
 
     # 2) Initial flux guess
-    # print("Step 2: Getting initial flux guess...")
+    step_start = time.time()
     mod.objective = objective_reaction
     if verbose:
         print("Model objective:", mod.objective)
     cobra_sol = mod.optimize()
     flux0 = cobra_sol.fluxes.to_dict()
+    _print_step_timing("Step 2: Get initial flux guess (COBRApy optimization)", step_start, verbose)
 
     # 3) Load & normalize kcat_dict
-    # print("Step 3: Processing kcat dictionary...")
+    step_start = time.time()
     if isinstance(kcat_dict, str):
         df = pd.read_csv(kcat_dict)
         tmp = {}
@@ -167,9 +212,10 @@ def run_optimization(
     # The old heuristic (if v < 1000) was unreliable during simulated annealing
     for key, vals in list(kcat_dict.items()):
         kcat_dict[key] = [v * 3600 for v in vals]
+    _print_step_timing(f"Step 3: Process kcat dictionary ({len(kcat_dict)} entries)", step_start, verbose)
 
     # 4) Build stoichiometry, bounds, objective
-    # print("Step 4: Building model data structures...")
+    step_start = time.time()
     S = create_stoichiometric_matrix(mod)
     mets = [m.id for m in mod.metabolites]
     rxns = [r.id for r in mod.reactions]
@@ -191,9 +237,10 @@ def run_optimization(
     obj_coef = {r.id: (1.0 if r.id == objective_reaction else 0.0) for r in mod.reactions} #obj_coef = {r.id: r.objective_coefficient for r in mod.reactions}
     met_index = {m: i for i, m in enumerate(mets)}
     rxn_index = {r: j for j, r in enumerate(rxns)}
+    _print_step_timing(f"Step 4: Build model data structures ({len(mets)} mets, {len(rxns)} rxns, {len(genes)} genes)", step_start, verbose)
 
     # 5) Generate DNF clauses
-    # print("Step 5: Parsing gene-protein-reaction rules...")
+    step_start = time.time()
     dnf_clauses = {}
     for r in mod.reactions:
         rule = (r.gene_reaction_rule or '').strip()
@@ -201,16 +248,19 @@ def run_optimization(
             continue
         tokens = _tokenize_gpr(rule)
         dnf_clauses[r.id] = _parse_gpr_to_dnf(tokens)
+    _print_step_timing(f"Step 5: Parse gene-protein-reaction rules ({len(dnf_clauses)} rules)", step_start, verbose)
 
     # 6) Build Pyomo model
-    # print("Step 6: Building Pyomo optimization model...")
+    step_start = time.time()
     m = ConcreteModel()  # noqa: F405
     m.M = Set(initialize=mets)  # noqa: F405
     m.R = Set(initialize=rxns)  # noqa: F405
     m.G = Set(initialize=genes)  # noqa: F405
+    _print_step_timing("Step 6a: Initialize Pyomo model sets", step_start, verbose)
 
     # For bidirectional constraints, identify reversible reactions
     if bidirectional_constraints:
+        step_start = time.time()
         # Find reversible reactions with both forward and reverse kcat data
         reversible_reactions = set()
         irreversible_reactions = set(rxns)  # Start with all reactions
@@ -236,6 +286,7 @@ def run_optimization(
         if verbose:
             print(f"Identified {len(true_reversible)} truly reversible reactions with bidirectional kcat data")
             print(f"Treating {len(irreversible_reactions)} reactions as irreversible")
+        _print_step_timing(f"Step 6b: Analyze bidirectional reactions ({len(true_reversible)} reversible)", step_start, verbose)
     else:
         m.R_rev = Set(initialize=[])  # noqa: F405
         m.R_irr = Set(initialize=rxns)  # noqa: F405
@@ -250,25 +301,24 @@ def run_optimization(
         m.K = Set(initialize=list(kcat_dict.keys()), dimen=2)  # noqa: F405
 
     # Variables
+    step_start = time.time()
     if bidirectional_constraints:
+        # Optimize bounds computation - calculate once, reuse
+        rxn_ub_pos = {r: max(0, ub[r]) for r in m.R_rev}
+        rxn_lb_neg = {r: max(0, -lb[r]) for r in m.R_rev}
+
         # Create separate forward and reverse variables for reversible reactions
         def v_fwd_bounds(mo, j):
-            if j in m.R_rev:
-                return (0, max(0, ub[j]))  # Forward flux is non-negative, upper bound is positive part
-            else:
-                return (0, 0)  # Not used for irreversible reactions
+            return (0, rxn_ub_pos.get(j, 0))
 
         def v_rev_bounds(mo, j):
-            if j in m.R_rev:
-                return (0, max(0, -lb[j]))  # Reverse flux is non-negative, upper bound is negative part
-            else:
-                return (0, 0)  # Not used for irreversible reactions
+            return (0, rxn_lb_neg.get(j, 0))
 
         def v_irr_bounds(mo, j):
             if j in m.R_irr:
-                return (lb[j], ub[j])  # Standard bounds for irreversible reactions
+                return (lb[j], ub[j])
             else:
-                return (0, 0)  # Not used for reversible reactions
+                return (0, 0)
 
         # Forward and reverse flux variables for reversible reactions
         m.v_fwd = Var(m.R_rev, domain=NonNegativeReals, bounds=v_fwd_bounds,  # noqa: F405
@@ -282,11 +332,11 @@ def run_optimization(
 
         # OPTION C: Direction-specific enzyme allocation for reversible reactions
         # Each gene can allocate enzyme to forward OR reverse direction, but not both simultaneously
-        m.E_fwd = Var(m.G, m.R_rev, domain=NonNegativeReals, initialize=0.005)  # noqa: F405
-        m.E_rev = Var(m.G, m.R_rev, domain=NonNegativeReals, initialize=0.005)  # noqa: F405
+        m.E_fwd = Var(m.G, m.R_rev, domain=NonNegativeReals, initialize=0.001)  # noqa: F405
+        m.E_rev = Var(m.G, m.R_rev, domain=NonNegativeReals, initialize=0.001)  # noqa: F405
 
         # Standard enzyme variables
-        m.E = Var(m.G, domain=NonNegativeReals, initialize=0.01)  # noqa: F405
+        m.E = Var(m.G, domain=NonNegativeReals, initialize=0.001)  # noqa: F405
 
         # Constraint: direction-specific enzyme allocation cannot exceed total enzyme
         def enzyme_allocation_constraint(mo, g, j):
@@ -306,16 +356,12 @@ def run_optimization(
             initialize=lambda mo, j: flux0.get(j, 0.0)
         )
         # Standard enzyme variables
-        m.E = Var(m.G, domain=NonNegativeReals, initialize=0.01)  # noqa: F405
+        m.E = Var(m.G, domain=NonNegativeReals, initialize=0.001)  # noqa: F405
+
+    _print_step_timing("Step 6c: Create variables (flux and enzyme)", step_start, verbose)
 
     # Mass balance
-    # substep_start = time.time()
-    # def mass_balance(mo, met):
-    #     i = met_index[met]
-    #     return sum(S[i, rxn_index[r]] * mo.v[r] for r in mo.R) == 0
-    # m.mass_balance = Constraint(m.M, rule=mass_balance)  # noqa: F405
-    # print(f"Mass balance constraints created in {time.time() - substep_start:.2f}s\n")
-
+    step_start = time.time()
     # OPTIMIZED mass balance
 
     # Pre-compute which reactions involve each metabolite
@@ -353,8 +399,10 @@ def run_optimization(
             return sum(S[i, rxn_index[r]] * mo.v[r] for r in relevant_rxns) == 0
 
     m.mass_balance = Constraint(m.M, rule=mass_balance_sparse)  # noqa: F405
+    _print_step_timing(f"Step 6d: Create mass balance constraints ({len(mets)} constraints)", step_start, verbose)
 
     # Objective
+    step_start = time.time()
     sense = maximize if maximization else minimize  # noqa: F405
     if bidirectional_constraints:
         # Objective using net flux for reversible reactions and standard flux for irreversible
@@ -372,8 +420,10 @@ def run_optimization(
     else:
         # Standard objective
         m.obj = Objective(expr=sum(obj_coef[r] * m.v[r] for r in m.R), sense=sense)  # noqa: F405
+    _print_step_timing("Step 6e: Create objective function", step_start, verbose)
 
     # Initialize constraint counters
+    step_start = time.time()
     constraints_added = 0
     constraints_skipped = 0
     skip_reasons = {'no_clauses': 0, 'gene_mismatch': 0, 'no_kcat': 0, 'multiple_clauses': 0}
@@ -385,12 +435,18 @@ def run_optimization(
     mixed_skip_reasons = {'single_clause': 0, 'no_complex': 0, 'bidirectional_rev': 0, 'no_capacities': 0}
     promis_added = 0
     promis_skipped = 0
-    
+
     # Bidirectional constraint counters
     bidirectional_iso_added = 0
     bidirectional_iso_skipped = 0
     bidirectional_mixed_added = 0
     bidirectional_mixed_skipped = 0
+
+    if verbose:
+        print("\n  Starting enzyme constraint generation...")
+        print(f"  Available constraint types: AND={not multi_enzyme_off}, ISO={not isoenzymes_off}, MIXED={not (isoenzymes_off or complexes_off)}, PROMISCUOUS={not promiscuous_off}")
+        print(f"  kcat entries: {len(kcat_dict)}, GPR rules: {len(dnf_clauses)}")
+    _print_step_timing("Step 7a: Initialize enzyme constraint generation", step_start, verbose)
 
     # 6a) AND‐GPR: single or complex (simple cases only)
     def and_rule(mo, *args):
@@ -504,7 +560,9 @@ def run_optimization(
         return Constraint.Skip  # noqa: F405
 
     if not multi_enzyme_off:
+        step_start = time.time()
         m.kcat_and = Constraint(m.K, rule=and_rule)  # noqa: F405
+        _print_step_timing(f"Step 7b: AND constraints ({constraints_added} added, {constraints_skipped} skipped)", step_start, verbose)
 
     # 6b) OR‐GPR: pure isoenzymes (no AND within clauses)
     def iso_rule(mo, rxn_id):
@@ -568,7 +626,9 @@ def run_optimization(
             return mo.v[rxn_id] <= sum(terms)
 
     if not isoenzymes_off:
+        step_start = time.time()
         m.kcat_iso = Constraint(m.R, rule=iso_rule)  # noqa: F405
+        _print_step_timing(f"Step 7c: ISO constraints ({iso_added} added, {iso_skipped} skipped)", step_start, verbose)
 
     # 6b2) Bidirectional isoenzyme constraints for reversible reactions
     if bidirectional_constraints and not isoenzymes_off:
@@ -749,7 +809,9 @@ def run_optimization(
 
     # Only add mixed constraints if neither isoenzymes nor complexes are disabled
     if not isoenzymes_off and not complexes_off:
+        step_start = time.time()
         m.kcat_mixed = Constraint(m.R, rule=mixed_rule)  # noqa: F405
+        _print_step_timing(f"Step 7d: MIXED constraints ({mixed_added} added, {mixed_skipped} skipped)", step_start, verbose)
 
     # 6c2) Bidirectional MIXED constraints for reversible reactions
     if bidirectional_constraints and not isoenzymes_off and not complexes_off:
@@ -787,18 +849,18 @@ def run_optimization(
                         kl = kcat_dict.get((rxn_id, g, direction), [])
                         if kl:
                             complex_kcats.extend(kl)
-                    
+
                     if not complex_kcats:
                         return None
-                    
+
                     avg_kcat = sum(complex_kcats) / len(complex_kcats)
-                    
+
                     # For complexes, use average of direction-specific allocations
                     if direction == 'forward':
                         avg_enzyme = sum(mo.E_fwd[g, rxn_id] for g in clause) / len(clause)
                     else:  # reverse
                         avg_enzyme = sum(mo.E_rev[g, rxn_id] for g in clause) / len(clause)
-                    
+
                     return avg_kcat, avg_enzyme
 
             # Calculate capacity for this direction
@@ -832,7 +894,7 @@ def run_optimization(
                             has_data['forward'] = True
                         if (rxn_id, g, 'reverse') in kcat_dict:
                             has_data['reverse'] = True
-                
+
                 if has_data['forward']:
                     bidirectional_mixed_keys.append((rxn_id, 'forward'))
                 if has_data['reverse']:
@@ -886,7 +948,9 @@ def run_optimization(
         return sum(usage) <= mo.E[g_id]
 
     if not promiscuous_off:
+        step_start = time.time()
         m.promiscuous = Constraint(m.G, rule=promis_rule)  # noqa: F405
+        _print_step_timing(f"Step 7e: Promiscuous constraints ({promis_added} added, {promis_skipped} skipped)", step_start, verbose)
 
     # Note: Bidirectional constraints are now handled in the main and_rule and iso_bidirectional_rule functions
     # This legacy bidirectional constraint code has been removed to avoid conflicts    # Print constraint summary (only if verbose)
@@ -924,7 +988,7 @@ def run_optimization(
             print("Bidirectional constraints: ENABLED (integrated with and_rule and iso constraints)")
             print(f"Bidirectional ISO constraints:     {bidirectional_iso_added:4d} added, {bidirectional_iso_skipped:4d} skipped")
             print(f"Bidirectional MIXED constraints:   {bidirectional_mixed_added:4d} added, {bidirectional_mixed_skipped:4d} skipped")
-            
+
             # Calculate total bidirectional coverage
             total_reversible = len(m.R_rev) if hasattr(m, 'R_rev') else 0
             bidirectional_covered = bidirectional_iso_added + bidirectional_mixed_added
@@ -944,13 +1008,13 @@ def run_optimization(
         print(f"{'='*60}")
         print(f"Total active enzyme constraints:   {total_active:4d}")
         print(f"{'='*60}\n")
-        
+
         # Enhanced diagnostic for understanding gaps
         if bidirectional_constraints:
             print("BIDIRECTIONAL CONSTRAINT ANALYSIS:")
             print(f"  Reversible reactions identified:   {len(m.R_rev)}")
             print(f"  Irreversible reactions:            {len(m.R_irr)}")
-            
+
             # Analyze what types of GPR structures exist
             gpr_types = {'single': 0, 'pure_iso': 0, 'mixed': 0, 'none': 0}
             for rxn_id in m.R_rev:
@@ -963,13 +1027,13 @@ def run_optimization(
                     gpr_types['pure_iso'] += 1
                 elif any(len(c) > 1 for c in clauses):
                     gpr_types['mixed'] += 1
-            
+
             print("  GPR structure breakdown for reversible reactions:")
             print(f"    Single gene:     {gpr_types['single']:4d} (handled by AND constraints)")
             print(f"    Pure isoenzymes: {gpr_types['pure_iso']:4d} (should be bidirectional ISO)")
             print(f"    Mixed complexes: {gpr_types['mixed']:4d} (should be bidirectional MIXED)")
             print(f"    No GPR:          {gpr_types['none']:4d} (no constraints possible)")
-            
+
             expected_bidirectional = gpr_types['pure_iso'] * 2 + gpr_types['mixed'] * 2  # *2 for forward+reverse
             actual_bidirectional = bidirectional_iso_added + bidirectional_mixed_added
             print(f"  Expected bidirectional constraints: {expected_bidirectional}")
@@ -977,7 +1041,7 @@ def run_optimization(
             if expected_bidirectional > actual_bidirectional:
                 print(f"  ⚠️  Gap: {expected_bidirectional - actual_bidirectional} missing bidirectional constraints!")
             print()
-        
+
         # Diagnostic: Check if we actually have any constraints
         if total_active == 0:
             print("WARNING: NO ENZYME CONSTRAINTS WERE CREATED!")
@@ -994,7 +1058,7 @@ def run_optimization(
             print(f"✓ Successfully created {total_active} enzyme constraints")
 
     # 7) Total enzyme pool / ratio
-    # print("Step 7: Adding enzyme pool constraints...")
+    step_start = time.time()
     if enzyme_ratio:
         if gene_sequences_dict is None:
             gene_sequences_dict = {}
@@ -1022,10 +1086,10 @@ def run_optimization(
     else:
         m.E_total = Var(domain=NonNegativeReals, bounds=(0, enzyme_upper_bound))  # noqa: F405
         m.total_enzyme = Constraint(expr=sum(m.E[g] for g in m.G) <= m.E_total)  # noqa: F405
-
+    _print_step_timing(f"Step 8: Create enzyme pool constraints (ratio={enzyme_ratio})", step_start, verbose)
 
     # 8) Solve
-    # print("Step 8: Setting up and running solver...")
+    step_start = time.time()
     solver = SolverFactory(solver_name)
 
     # Debug: Check if solver is available
@@ -1036,10 +1100,12 @@ def run_optimization(
 
     # Set solver tolerances to avoid numerical precision warnings
     if solver_name.lower() == 'glpk':
-        solver.options['tmlim'] = 300  # time limit in seconds
+        # Use minimal GLPK options to avoid conflicts
+        solver.options['tmlim'] = 600  # time limit in seconds (increased)
     elif solver_name.lower() == 'gurobi':
         solver.options['FeasibilityTol'] = 1e-9
         solver.options['OptimalityTol'] = 1e-9
+        solver.options['MemLimit'] = 4.0  # 4GB memory limit
     # elif solver_name.lower() == 'cplex':
         # CPLEX options for better performance
         # solver.options['timelimit'] = 300  # time limit in seconds
@@ -1047,19 +1113,28 @@ def run_optimization(
     #solver.options['threads'] = 4
     # print("Solver:", solver)
     # print(f"Solver options: {dict(solver.options)}")
-    solver.solve(m, tee=tee, load_solutions=True)
+    _print_step_timing("Step 9a: Setup solver", step_start, verbose)
+
+    # Actually solve the optimization problem
+    step_start = time.time()
+    solver.solve(m, tee=False, load_solutions=True)  # Always suppress solver output
+    _print_step_timing("Step 9b: Solve optimization problem", step_start, verbose)
     # Print total enzyme usage after optimization if possible
     if enzyme_ratio and verbose:
         try:
             # Count non-zero enzyme values
             non_zero_enzymes = [g for g in m.G if value(m.E[g]) > 1e-6]
             total_enzyme = value(sum(m.E[g] * mw[g] for g in m.G) * 1e-3)
+            e_ratio_value = value(m.E_ratio) if hasattr(m, 'E_ratio') else None
             print(f"[DIAG] Number of genes with enzyme allocation: {len(non_zero_enzymes)}/{len(m.G)}")
             print(f"[DIAG] Total enzyme usage (g/gDW): {total_enzyme:.6g} (upper bound: {enzyme_upper_bound})")
+            if e_ratio_value is not None:
+                print(f"[DIAG] Final E_ratio value: {e_ratio_value:.6g}")
         except Exception as e:
             print(f"[DIAG] Could not compute total enzyme usage: {e}")
 
     # 9) Post-process - handle numerical precision issues
+    step_start = time.time()
     # Clamp very small values to zero to avoid floating-point errors
     tolerance = 1e-10
 
@@ -1098,21 +1173,27 @@ def run_optimization(
         if abs(val) < tolerance:
             val = 0.0
         m.E[g].value = max(val, 0.0)
+    _print_step_timing("Step 10a: Post-process numerical precision", step_start, verbose)
 
     # 10) Collect results
+    step_start = time.time()
     sol_val = value(m.obj)  # noqa: F405
 
-    # Collect flux results
+    # Collect flux results more efficiently
     records = []
+
+    # Process results efficiently
     if bidirectional_constraints:
         # For reversible reactions, compute net flux and store both forward/reverse components
         for r in m.R_rev:
             v_fwd = m.v_fwd[r].value if m.v_fwd[r].value is not None else 0.0
             v_rev = m.v_rev[r].value if m.v_rev[r].value is not None else 0.0
             net_flux = v_fwd - v_rev
-            records.append(('flux', r, net_flux))
-            records.append(('flux_fwd', r, v_fwd))
-            records.append(('flux_rev', r, v_rev))
+            records.extend([
+                ('flux', r, net_flux),
+                ('flux_fwd', r, v_fwd),
+                ('flux_rev', r, v_rev)
+            ])
 
         # For irreversible reactions, use standard flux
         for r in m.R_irr:
@@ -1120,29 +1201,30 @@ def run_optimization(
             records.append(('flux', r, flux_val))
     else:
         # Standard flux collection
-        for r in m.R:
-            flux_val = m.v[r].value if m.v[r].value is not None else 0.0
-            records.append(('flux', r, flux_val))
+        records.extend([('flux', r, m.v[r].value if m.v[r].value is not None else 0.0) for r in m.R])
 
     # Collect enzyme results
-    for g in m.G:
-        enz_val = m.E[g].value if m.E[g].value is not None else 0.0
-        records.append(('enzyme', g, enz_val))
-
-        # If using bidirectional constraints with direction-specific allocation (Option C),
-        # also collect forward and reverse enzyme allocations
-        if bidirectional_constraints and hasattr(m, 'E_fwd') and hasattr(m, 'E_rev'):
-            # Collect forward and reverse enzyme allocations for each reaction
-            for r in m.R:
-                if (g, r) in m.E_fwd:
-                    e_fwd_val = m.E_fwd[g, r].value if m.E_fwd[g, r].value is not None else 0.0
-                    records.append(('enzyme_fwd', f"{g}_{r}", e_fwd_val))
-
-                if (g, r) in m.E_rev:
-                    e_rev_val = m.E_rev[g, r].value if m.E_rev[g, r].value is not None else 0.0
-                    records.append(('enzyme_rev', f"{g}_{r}", e_rev_val))
+    records.extend([('enzyme', g, m.E[g].value if m.E[g].value is not None else 0.0) for g in m.G])
 
     df_FBA = pd.DataFrame(records, columns=['Variable','Index','Value'])
+    _print_step_timing(f"Step 10b: Collect results ({len(records)} variables)", step_start, verbose)
+
+    # Final timing summary
+    if verbose:
+        total_time = time.time() - overall_start
+        final_memory = _get_memory_usage()
+        print(f"\n{'='*60}")
+        print("OPTIMIZATION COMPLETED")
+        print(f"{'='*60}")
+        print(f"Total optimization time: {total_time:.2f}s")
+        if final_memory > 0:
+            print(f"Final memory usage: {final_memory:.1f} MB")
+            if initial_memory > 0:
+                memory_increase = final_memory - initial_memory
+                print(f"Memory increase: {memory_increase:.1f} MB")
+        print(f"Objective value: {sol_val:.6f}")
+        print(f"Solution variables: {len(records)}")
+        print(f"{'='*60}\n")
 
     # DIAGNOSTIC: Print exchange reaction fluxes if medium was provided
     # if medium is not None:

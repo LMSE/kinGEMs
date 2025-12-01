@@ -5,8 +5,8 @@
 #SBATCH --job-name=fva_ablation
 #SBATCH --account=def-mahadeva
 #SBATCH --cpus-per-task=8
-#SBATCH --time=0-30:00:00
-#SBATCH --mem=64G
+#SBATCH --time=3-20:00:00
+#SBATCH --mem=128G
 #SBATCH --output=logs/fva_ablation_%j.out
 #SBATCH --error=logs/fva_ablation_%j.err
 #SBATCH --mail-user=ranamoneim@gmail.com

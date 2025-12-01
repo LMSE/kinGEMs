@@ -2,10 +2,12 @@
   "model_name": "iML1515_GEM",
   "organism": "E coli",
   "biomass_reaction": null,
-  "enzyme_upper_bound": 0.15,
+  "enzyme_upper_bound": 0.2,
   "solver": "glpk",
   "enable_fva": true,
   "enable_biolog_validation": false,
+  "bidirectional_constraints": true,
+  "_comment_bidirectional": "Disable for faster performance - reduces memory and solve time significantly",
 
   "fva": {
     "parallel": true,

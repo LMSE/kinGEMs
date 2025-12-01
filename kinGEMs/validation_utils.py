@@ -434,7 +434,7 @@ def calculate_phenotypes_with_dataframe(
     output_dir=None,
     save_results=True,
     print_reaction_conditions=True,
-    verbose=True
+    verbose=False
 ):
     """
     Wrapper for run_optimization_with_dataframe to calculate phenotypes for a kinGEMs model and processed DataFrame.
@@ -499,7 +499,7 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
         where improvement_info is a dict with growth improvement details or None
     """
     from kinGEMs.modeling.optimize import run_optimization_with_dataframe
-    
+
     improvement_info = None  # Will store growth improvement details if detected
 
     print(f"  🚀 Starting {mode} simulation: Gene {gene} × Carbon {carbon_name} (idx {carbon_idx})")
@@ -593,16 +593,16 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
             try:
                 if 'wild_type_growth' in locals() and wild_type_growth > 0:
                     change = ((solution - wild_type_growth) / wild_type_growth) * 100
-                    
+
                     # Check for growth IMPROVEMENT (>1% increase)
                     if change > 1.0:
                         print(f"    🌟 GROWTH IMPROVEMENT DETECTED: {change:.2f}% increase!")
                         print(f"       Wild-type: {wild_type_growth:.6f} → Knockout: {solution:.6f}")
-                        
+
                         # Get associated reactions for this gene
                         gene_obj = model.genes.get_by_id(gene)
                         associated_reactions = [r.id for r in gene_obj.reactions if r.id != objective_reaction]
-                        
+
                         improvement_info = {
                             'gene': gene,
                             'carbon_source': carbon_name,
@@ -655,16 +655,16 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
             try:
                 if 'wt_solution_value' in locals() and wt_solution_value > 0:
                     change = ((solution_value - wt_solution_value) / wt_solution_value) * 100
-                    
+
                     # Check for growth IMPROVEMENT (>1% increase)
                     if change > 1.0:
                         print(f"    🌟 GROWTH IMPROVEMENT DETECTED: {change:.2f}% increase!")
                         print(f"       Wild-type: {wt_solution_value:.6f} → Knockout: {solution_value:.6f}")
-                        
+
                         # Get associated reactions for this gene
                         gene_obj = model.genes.get_by_id(gene)
                         associated_reactions = [r.id for r in gene_obj.reactions if r.id != objective_reaction]
-                        
+
                         improvement_info = {
                             'gene': gene,
                             'carbon_source': carbon_name,
@@ -716,16 +716,16 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
                     try:
                         if 'wt_solution_value' in locals() and wt_solution_value > 0:
                             change = ((solution_value - wt_solution_value) / wt_solution_value) * 100
-                            
+
                             # Check for growth IMPROVEMENT (>1% increase)
                             if change > 1.0:
                                 print(f"    🌟 GROWTH IMPROVEMENT DETECTED: {change:.2f}% increase!")
                                 print(f"       Wild-type: {wt_solution_value:.6f} → Knockout: {solution_value:.6f}")
-                                
+
                                 # Get associated reactions for this gene
                                 gene_obj = model.genes.get_by_id(gene)
                                 associated_reactions = [r.id for r in gene_obj.reactions if r.id != objective_reaction]
-                                
+
                                 improvement_info = {
                                     'gene': gene,
                                     'carbon_source': carbon_name,
@@ -788,7 +788,7 @@ def _simulate_gene_carbon_chunk(model, processed_df, tasks, medium_ex_inds,
     """
     results = []
     improvements = []
-    
+
     for gene, carbon_idx, carbon_name in tasks:
         gene_result, carbon_idx_result, growth_value, improvement_info = _simulate_gene_carbon(
             model=model.copy(),
@@ -804,10 +804,10 @@ def _simulate_gene_carbon_chunk(model, processed_df, tasks, medium_ex_inds,
             solver_name=solver_name
         )
         results.append((gene_result, carbon_idx_result, growth_value))
-        
+
         if improvement_info is not None:
             improvements.append(improvement_info)
-    
+
     return (results, improvements)
 
 
@@ -1023,35 +1023,35 @@ def simulate_phenotype_parallel(
         enzyme_constrained_GEM[:, cached_idx] = enzyme_constrained_GEM[:, original_idx]
 
     print("  Enzyme-constrained GEM simulation complete.")
-    
+
     # ===== Save and Report Growth Improvements =====
     all_improvements = []
     if not skip_baseline:
         all_improvements.extend(baseline_improvements)
     all_improvements.extend(enzyme_improvements)
-    
+
     if all_improvements:
         print(f"\n  {'='*80}")
         print(f"  🌟 GROWTH IMPROVEMENTS DETECTED: {len(all_improvements)} cases")
         print(f"  {'='*80}")
-        
+
         # Save improvements to CSV
         import pandas as pd
         improvements_df = pd.DataFrame(all_improvements)
-        
+
         # Sort by percent increase (descending)
         improvements_df = improvements_df.sort_values('percent_increase', ascending=False)
-        
+
         # Create output filename with timestamp
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = f"growth_improvements_{timestamp}.csv"
         improvements_df.to_csv(output_file, index=False)
-        
+
         print(f"  ✅ Saved growth improvements to: {output_file}")
         print(f"\n  Top 10 growth improvements:")
         print(f"  {'-'*80}")
-        
+
         # Display top 10
         for idx, row in improvements_df.head(10).iterrows():
             print(f"  {idx+1}. Gene: {row['gene']}, Carbon: {row['carbon_source']}")
@@ -1059,7 +1059,7 @@ def simulate_phenotype_parallel(
             print(f"     Reactions: {', '.join(row['associated_reactions'][:5])}{' ...' if len(row['associated_reactions']) > 5 else ''}")
             print(f"     Mode: {row['mode']}")
             print()
-        
+
         print(f"  {'-'*80}")
         print(f"  See full list in: {output_file}")
         print(f"  {'='*80}\n")
@@ -1215,7 +1215,7 @@ def _run_validation_multiprocessing(model, processed_df, chunks, medium_ex_inds,
             # Unpack chunk results and improvements
             chunk_data, chunk_improvements = chunk_result
             results.append(chunk_data)
-            
+
             # Collect any growth improvements from this chunk
             if chunk_improvements:
                 all_improvements.extend(chunk_improvements)

@@ -5,8 +5,8 @@
 #SBATCH --job-name=pretuning_kinGEMs
 #SBATCH --account=def-mahadeva
 #SBATCH --cpus-per-task=8
-#SBATCH --time=0-15:00:00
-#SBATCH --mem=120G
+#SBATCH --time=2-24:00:00
+#SBATCH --mem=240G
 #SBATCH --output=/project/def-mahadeva/ranaab/kinGEMs_v2/logs/pretuning_%j.out
 #SBATCH --error=/project/def-mahadeva/ranaab/kinGEMs_v2/logs/pretuning_%j.err
 #SBATCH --mail-user=ranamoneim@gmail.com
