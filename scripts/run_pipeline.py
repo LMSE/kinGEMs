@@ -48,6 +48,7 @@ from kinGEMs.dataset import (
     merge_substrate_sequences,
     prepare_model_data,
     process_kcat_predictions,
+    convert_to_irreversible
 )
 from kinGEMs.dataset_modelseed import prepare_modelseed_model_data
 from kinGEMs.modeling.fva import (
@@ -286,7 +287,7 @@ def run_fva_analysis(model, processed_df, biomass_reaction, enzyme_upper_bound,
         "Max Solutions": cobra_fva_results['maximum'],
         "Solution Biomass": [model.slim_optimize()] * len(cobra_fva_results)
     })
-    
+
     cobra_fva_df.to_csv(fva_baseline_results_path, index=False)
     print(f"  COBRApy FVA completed: {len(cobra_fva_df)} reactions analyzed and results saved to {fva_baseline_results_path}")
 
@@ -496,6 +497,9 @@ def main():
         substrate_df = pd.read_csv(substrates_output)
         sequences_df = pd.read_csv(sequences_output)
         model = load_model(model_path)
+        # orig_model = model.copy()  # Keep original for comparison
+        # Convert to irreversible for proper enzyme constraint handling
+        model = convert_to_irreversible(model)
     else:
         if FORCE_REGENERATE:
             print("  ⟳ Regenerating model data (--force flag)")
@@ -504,6 +508,7 @@ def main():
 
         if is_modelseed:
             metadata_dir = config.get('metadata_dir', os.path.join(data_dir, "Biolog experiments"))
+            # orig_model = load_model(model_path)
             model, substrate_df, sequences_df = prepare_modelseed_model_data(
                 model_path=model_path,
                 substrates_output=substrates_output,
@@ -512,11 +517,13 @@ def main():
                 metadata_dir=metadata_dir
             )
         else:
+            # orig_model = load_model(model_path)
             model, substrate_df, sequences_df = prepare_model_data(
                 model_path=model_path,
                 substrates_output=substrates_output,
                 sequences_output=sequences_output,
-                organism=organism
+                organism=organism,
+                convert_irreversible=True  # Enable irreversible conversion for enzyme constraints
             )
         print("  ✓ Generated and saved substrates and sequences")
 
@@ -582,12 +589,12 @@ def main():
     # === Step 4: Optimization ===
     print("\n=== Step 4: Running optimization ===")
 
-    # Extract medium constraints from config 
+    # Extract medium constraints from config
     medium_temp = config.get('medium', None)
     medium_upper_bound_temp = config.get('medium_upper_bound', True)
     # First run standard COBRApy optimization for comparison
     print("  Running standard COBRApy FBA (no enzyme constraints)...")
-    
+
     # Apply medium constraints if specified
     if medium_temp is not None:
         mode = "fixed fluxes" if medium_upper_bound_temp else "max uptake rates"
@@ -603,14 +610,14 @@ def main():
                     print(f"    Set {rxn_id} lower bound: {flux_value} (upper: {rxn.upper_bound})")
             except KeyError:
                 print(f"    Warning: Reaction '{rxn_id}' not found in model")
-    
+
     cobra_solution = model.optimize()
     cobra_biomass = cobra_solution.objective_value
     print(f"    COBRApy biomass: {cobra_biomass:.4f}")
 
     # Now run enzyme-constrained optimization
     print("  Running kinGEMs enzyme-constrained optimization...")
-    
+
     (solution_value, df_FBA, gene_sequences_dict, _) = run_optimization_with_dataframe(
         model=model,
         processed_df=processed_data,
