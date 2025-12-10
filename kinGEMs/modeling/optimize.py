@@ -713,6 +713,24 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction,
         kcat_col = 'kcat'
     else:
         kcat_col = 'kcat_mean'
+        print("  [KCAT DEBUG] Using 'kcat_mean' column for optimization")
+
+    if verbose:
+        # Show some example values to verify which column is being used
+        sample_data = processed_df[processed_df[kcat_col].notna()].head(3)
+        if 'kcat_updated' in processed_df.columns:
+            print("  [KCAT DEBUG] Sample kcat_mean vs kcat_updated values:")
+            for idx, row in sample_data.iterrows():
+                rxn, gene = row['Reactions'], row['Single_gene']
+                kcat_mean = row.get('kcat_mean', 'N/A')
+                kcat_updated = row.get('kcat_updated', 'N/A')
+                print(f"    {rxn}_{gene}: kcat_mean={kcat_mean:.3e}, kcat_updated={kcat_updated:.3e}")
+        else:
+            print(f"  [KCAT DEBUG] Sample {kcat_col} values:")
+            for idx, row in sample_data.iterrows():
+                rxn, gene = row['Reactions'], row['Single_gene']
+                kcat_val = row[kcat_col]
+                print(f"    {rxn}_{gene}: {kcat_col}={kcat_val:.3e}")
 
     # Filter valid rows first
     valid_rows = processed_df[processed_df[kcat_col].notna() & processed_df['SEQ'].notna()].copy()
