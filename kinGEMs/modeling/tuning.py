@@ -124,15 +124,14 @@ def simulated_annealing(
         # Generate small positive perturbations only (conservative increases)
         # Use 90% positive bias: 90% chance of increase, 10% chance of decrease
         if random.random() < 0.9:  # 90% chance of positive perturbation
-            perturbation = abs(random.gauss(0, std_hr * 0.01))  # 1% of std, positive
+            perturbation = abs(random.gauss(0, 10*std_hr))  # 1 order magnitude of std, positive
             new_kcat = k_val_hr + perturbation  # Increase
         else:  # 10% chance of small decrease
-            perturbation = abs(random.gauss(0, std_hr * 0.005))  # 0.5% of std, negative
+            perturbation = abs(random.gauss(0, std_hr))  # std, negative
             new_kcat = k_val_hr - perturbation  # Decrease
 
         # Set bounds for perturbations
         # Allow increases up to 2% above original or 0.1 standard deviations, whichever is smaller
-        max_increase = min(k_val_hr * 0.02, 0.1 * std_hr)  # Ultra-conservative 2% increase
         ub = k_val_hr + std_hr #max_increase
         ub = min(ub, 4.6e9)  # Biological maximum
 
