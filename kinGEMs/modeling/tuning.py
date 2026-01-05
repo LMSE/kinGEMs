@@ -117,22 +117,23 @@ def simulated_annealing(
         k_val_hr = kcat_value * 3600
         std_hr = std * 3600 if not pd.isna(std) else 0
 
-        # If no standard deviation, use a very conservative default
+        # If no standard deviation, use a more aggressive default for exploration
         if std_hr == 0 or pd.isna(std_hr):
-            std_hr = k_val_hr * 0.05  # 5% of original value (very conservative)
+            std_hr = k_val_hr * 0.2  # 20% of original value (more aggressive)
 
-        # Generate small positive perturbations only (conservative increases)
-        # Use 90% positive bias: 90% chance of increase, 10% chance of decrease
-        if random.random() < 0.9:  # 90% chance of positive perturbation
-            perturbation = abs(random.gauss(0, 10*std_hr))  # 1 order magnitude of std, positive
+        # Generate larger perturbations for meaningful improvements
+        # Use 85% positive bias: 85% chance of increase, 15% chance of decrease
+        if random.random() < 0.85:  # 85% chance of positive perturbation
+            # Much larger increases - up to 50% of original kcat
+            perturbation = abs(random.gauss(0, 10*std_hr))  # 1 order of magnitude larger std
             new_kcat = k_val_hr + perturbation  # Increase
         else:  # 10% chance of small decrease
             perturbation = abs(random.gauss(0, std_hr))  # std, negative
             new_kcat = k_val_hr - perturbation  # Decrease
 
-        # Set bounds for perturbations
-        # Allow increases up to 2% above original or 0.1 standard deviations, whichever is smaller
-        ub = k_val_hr + std_hr #max_increase
+        # Set bounds for perturbations - allow larger changes
+        # Allow increases up to 100% above original
+        ub = 10*std_hr # 1 order of magnitude higher! #k_val_hr * 2.0  # Double the original kcat
         ub = min(ub, 4.6e9)  # Biological maximum
 
         # Set lower bound to prevent going too low (10% of original minimum)
@@ -280,9 +281,9 @@ def simulated_annealing(
         updated_df = df_new.copy()
         actually_changed = 0
 
-        # Only perturb a random subset (30-50%) of enzymes each iteration
-        # This reduces the chance of overwhelming the enzyme budget
-        n_to_perturb = max(1, int(len(largest_rxn_id) * random.uniform(0.1, 0.2)))
+        # Perturb more enzymes per iteration for bigger impact
+        # Use 30-60% of enzymes per iteration (was 10-20%)
+        n_to_perturb = max(1, int(len(largest_rxn_id) * random.uniform(0.3, 0.6)))
         indices_to_perturb = random.sample(range(len(largest_rxn_id)), n_to_perturb)
 
         # if iteration <= 3:  # Debug info
