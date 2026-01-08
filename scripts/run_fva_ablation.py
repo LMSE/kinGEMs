@@ -27,26 +27,24 @@ Output:
 
 import argparse
 from datetime import datetime
-import gc  # For memory cleanup
+import gc
 import json
 import os
 import random
 import sys
 import warnings
 
-import cobra
 from cobra.flux_analysis import flux_variability_analysis as cobra_fva
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import seaborn as sns
 
 # Add parent directory to Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from kinGEMs.dataset import (
     load_model,
+    convert_to_irreversible
 )
+
 from kinGEMs.modeling.fva import (
     flux_variability_analysis,
     flux_variability_analysis_parallel,
@@ -130,10 +128,10 @@ def run_baseline_fva(model):
 
 def run_single_enzyme_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
                           use_parallel=False, n_workers=None, method='dask', chunk_size=None):
-    """Level 2: Single enzyme constraint only."""
+    """Level 2: Single enzyme constraint only (basic enzyme constraints without complex features)."""
     print("\n=== Level 2: Single enzyme constraint only ===")
-    print("  (multi_enzyme_off=False, isoenzymes_off=True, promiscuous_off=True, complexes_off=False)")
-    print("  (This enables AND constraints for single enzymes and complexes, but disables isoenzyme and promiscuous constraints)")
+    print("  (multi_enzyme_off=False, isoenzymes_off=True, promiscuous_off=True, complexes_off=True)")
+    print("  Only basic enzyme-reaction constraints (v_j ≤ kcat_j * e_i)")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
@@ -146,10 +144,10 @@ def run_single_enzyme_fva(model, processed_df, biomass_reaction, enzyme_upper_bo
             n_workers=n_workers,
             method=method,
             chunk_size=chunk_size,
-            multi_enzyme_off=False,
-            isoenzymes_off=True,
-            promiscuous_off=True,
-            complexes_off=False
+            multi_enzyme_off=False,  # Enable basic multi-enzyme (single/complex)
+            isoenzymes_off=True,     # Disable isoenzymes (OR-GPR)
+            promiscuous_off=True,    # Disable promiscuous enzyme sharing
+            complexes_off=True       # Disable complex enzyme logic
         )
         # Extract biomass value from the FVA results
         biomass = fva_df['Solution Biomass'].iloc[0]
@@ -159,10 +157,10 @@ def run_single_enzyme_fva(model, processed_df, biomass_reaction, enzyme_upper_bo
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             enzyme_upper_bound=enzyme_upper_bound,
-            multi_enzyme_off=False,
-            isoenzymes_off=True,
-            promiscuous_off=True,
-            complexes_off=False
+            multi_enzyme_off=False,  # Enable basic multi-enzyme (single/complex)
+            isoenzymes_off=True,     # Disable isoenzymes (OR-GPR)
+            promiscuous_off=True,    # Disable promiscuous enzyme sharing
+            complexes_off=True       # Disable complex enzyme logic
         )
         # Extract biomass value from the FVA results
         biomass = fva_df['Solution Biomass'].iloc[0]
@@ -175,9 +173,10 @@ def run_single_enzyme_fva(model, processed_df, biomass_reaction, enzyme_upper_bo
 
 def run_isoenzymes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
                        use_parallel=False, n_workers=None, method='dask', chunk_size=None):
-    """Level 3a: Single enzyme + isoenzymes."""
+    """Level 3a: Basic enzyme constraints + isoenzymes (OR-GPR handling)."""
     print("\n=== Level 3a: + Isoenzymes ===")
-    print("  (isoenzymes_off=False, multi_enzyme_off=False, promiscuous_off=True, complexes_off=False)")
+    print("  (multi_enzyme_off=False, isoenzymes_off=False, promiscuous_off=True, complexes_off=True)")
+    print("  Basic constraints + OR-GPR handling for alternative enzymes")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
@@ -190,10 +189,10 @@ def run_isoenzymes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound
             n_workers=n_workers,
             method=method,
             chunk_size=chunk_size,
-            multi_enzyme_off=False,
-            isoenzymes_off=False,
-            promiscuous_off=True,
-            complexes_off=False
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=False,    # Enable isoenzymes (OR-GPR)
+            promiscuous_off=True,    # Disable promiscuous enzyme sharing
+            complexes_off=True       # Disable complex enzyme logic
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
     else:
@@ -202,10 +201,10 @@ def run_isoenzymes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             enzyme_upper_bound=enzyme_upper_bound,
-            multi_enzyme_off=False,
-            isoenzymes_off=False,
-            promiscuous_off=True,
-            complexes_off=False
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=False,    # Enable isoenzymes (OR-GPR)
+            promiscuous_off=True,    # Disable promiscuous enzyme sharing
+            complexes_off=True       # Disable complex enzyme logic
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
 
@@ -217,10 +216,10 @@ def run_isoenzymes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound
 
 def run_complexes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
                       use_parallel=False, n_workers=None, method='dask', chunk_size=None):
-    """Level 3b: Single enzyme + complexes."""
+    """Level 3b: Basic enzyme constraints + enzyme complexes (AND-GPR handling)."""
     print("\n=== Level 3b: + Enzyme Complexes ===")
-    print("  (complexes_off=False, multi_enzyme_off=False, isoenzymes_off=True, promiscuous_off=True)")
-    print("  (This is the same as Level 2 since complexes are already included in AND constraints)")
+    print("  (multi_enzyme_off=False, isoenzymes_off=True, promiscuous_off=True, complexes_off=False)")
+    print("  Basic constraints + AND-GPR handling for enzyme complexes")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
@@ -233,10 +232,10 @@ def run_complexes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
             n_workers=n_workers,
             method=method,
             chunk_size=chunk_size,
-            multi_enzyme_off=False,
-            isoenzymes_off=True,
-            promiscuous_off=True,
-            complexes_off=False
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=True,     # Disable isoenzymes (OR-GPR)
+            promiscuous_off=True,    # Disable promiscuous enzyme sharing
+            complexes_off=False      # Enable complex enzyme logic (AND-GPR)
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
     else:
@@ -245,10 +244,10 @@ def run_complexes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             enzyme_upper_bound=enzyme_upper_bound,
-            multi_enzyme_off=False,
-            isoenzymes_off=True,
-            promiscuous_off=True,
-            complexes_off=False
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=True,     # Disable isoenzymes (OR-GPR)
+            promiscuous_off=True,    # Disable promiscuous enzyme sharing
+            complexes_off=False      # Enable complex enzyme logic (AND-GPR)
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
 
@@ -260,9 +259,10 @@ def run_complexes_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
 
 def run_promiscuous_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
                        use_parallel=False, n_workers=None, method='dask', chunk_size=None):
-    """Level 3c: Single enzyme + promiscuous enzymes."""
+    """Level 3c: Basic enzyme constraints + promiscuous enzymes (cross-reaction sharing)."""
     print("\n=== Level 3c: + Promiscuous Enzymes ===")
-    print("  (promiscuous_off=False, multi_enzyme_off=False, isoenzymes_off=True, complexes_off=False)")
+    print("  (multi_enzyme_off=False, isoenzymes_off=True, promiscuous_off=False, complexes_off=True)")
+    print("  Basic constraints + enzyme sharing across multiple reactions")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
@@ -275,10 +275,10 @@ def run_promiscuous_fva(model, processed_df, biomass_reaction, enzyme_upper_boun
             n_workers=n_workers,
             method=method,
             chunk_size=chunk_size,
-            multi_enzyme_off=False,
-            isoenzymes_off=True,
-            promiscuous_off=False,
-            complexes_off=False
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=True,     # Disable isoenzymes (OR-GPR)
+            promiscuous_off=False,   # Enable promiscuous enzyme sharing
+            complexes_off=True       # Disable complex enzyme logic
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
     else:
@@ -287,10 +287,10 @@ def run_promiscuous_fva(model, processed_df, biomass_reaction, enzyme_upper_boun
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
             enzyme_upper_bound=enzyme_upper_bound,
-            multi_enzyme_off=False,
-            isoenzymes_off=True,
-            promiscuous_off=False,
-            complexes_off=False
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=True,     # Disable isoenzymes (OR-GPR)
+            promiscuous_off=False,   # Enable promiscuous enzyme sharing
+            complexes_off=True       # Disable complex enzyme logic
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
 
@@ -302,9 +302,10 @@ def run_promiscuous_fva(model, processed_df, biomass_reaction, enzyme_upper_boun
 
 def run_all_constraints_fva(model, processed_df, biomass_reaction, enzyme_upper_bound,
                            use_parallel=False, n_workers=None, method='dask', chunk_size=None):
-    """Level 4: All constraints (default kinGEMs)."""
+    """Level 4: All constraints (complete kinGEMs implementation)."""
     print("\n=== Level 4: All Constraints ===")
-    print("  (all constraint types enabled)")
+    print("  (multi_enzyme_off=False, isoenzymes_off=False, promiscuous_off=False, complexes_off=False)")
+    print("  Complete kinGEMs: basic + isoenzymes + complexes + promiscuous enzymes")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
@@ -316,7 +317,11 @@ def run_all_constraints_fva(model, processed_df, biomass_reaction, enzyme_upper_
             enzyme_upper_bound=enzyme_upper_bound,
             n_workers=n_workers,
             method=method,
-            chunk_size=chunk_size
+            chunk_size=chunk_size,
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=False,    # Enable isoenzymes (OR-GPR)
+            promiscuous_off=False,   # Enable promiscuous enzyme sharing
+            complexes_off=False      # Enable complex enzyme logic (AND-GPR)
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
     else:
@@ -324,7 +329,11 @@ def run_all_constraints_fva(model, processed_df, biomass_reaction, enzyme_upper_
             model=model,
             processed_df=processed_df,
             biomass_reaction=biomass_reaction,
-            enzyme_upper_bound=enzyme_upper_bound
+            enzyme_upper_bound=enzyme_upper_bound,
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=False,    # Enable isoenzymes (OR-GPR)
+            promiscuous_off=False,   # Enable promiscuous enzyme sharing
+            complexes_off=False      # Enable complex enzyme logic (AND-GPR)
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
 
@@ -336,9 +345,10 @@ def run_all_constraints_fva(model, processed_df, biomass_reaction, enzyme_upper_
 
 def run_tuned_fva(model, tuned_df, biomass_reaction, enzyme_upper_bound,
                  use_parallel=False, n_workers=None, method='dask', chunk_size=None):
-    """Level 5: Post-tuned kinGEMs (after simulated annealing)."""
+    """Level 5: Post-tuned kinGEMs (complete constraints with optimized kcat values)."""
     print("\n=== Level 5: Post-Tuned (Simulated Annealing) ===")
-    print("  (all constraints with tuned kcat values)")
+    print("  (multi_enzyme_off=False, isoenzymes_off=False, promiscuous_off=False, complexes_off=False)")
+    print("  Complete kinGEMs with tuned kcat values from simulated annealing")
 
     if use_parallel:
         print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
@@ -350,7 +360,11 @@ def run_tuned_fva(model, tuned_df, biomass_reaction, enzyme_upper_bound,
             enzyme_upper_bound=enzyme_upper_bound,
             n_workers=n_workers,
             method=method,
-            chunk_size=chunk_size
+            chunk_size=chunk_size,
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=False,    # Enable isoenzymes (OR-GPR)
+            promiscuous_off=False,   # Enable promiscuous enzyme sharing
+            complexes_off=False      # Enable complex enzyme logic (AND-GPR)
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
     else:
@@ -358,7 +372,11 @@ def run_tuned_fva(model, tuned_df, biomass_reaction, enzyme_upper_bound,
             model=model,
             processed_df=tuned_df,
             biomass_reaction=biomass_reaction,
-            enzyme_upper_bound=enzyme_upper_bound
+            enzyme_upper_bound=enzyme_upper_bound,
+            multi_enzyme_off=False,  # Enable basic multi-enzyme
+            isoenzymes_off=False,    # Enable isoenzymes (OR-GPR)
+            promiscuous_off=False,   # Enable promiscuous enzyme sharing
+            complexes_off=False      # Enable complex enzyme logic (AND-GPR)
         )
         biomass = fva_df['Solution Biomass'].iloc[0]
 
@@ -403,9 +421,7 @@ def main():
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     data_dir = os.path.join(project_root, "data")
     raw_data_dir = os.path.join(data_dir, "raw")
-    interim_data_dir = os.path.join(data_dir, "interim", model_name)
     processed_data_dir = os.path.join(data_dir, "processed", model_name)
-    CPIPred_data_dir = os.path.join(data_dir, "interim", "CPI-Pred predictions")
     results_dir = os.path.join(project_root, "results", "fva_ablation", run_id)
     os.makedirs(results_dir, exist_ok=True)
 
@@ -450,6 +466,21 @@ def main():
     if 'kcat_mean' in processed_df.columns and 'kcat' not in processed_df.columns:
         processed_df['kcat'] = processed_df['kcat_mean']
 
+    # Print constraint configuration table
+    print("\n" + "="*80)
+    print("=== ABLATION STUDY CONSTRAINT CONFIGURATION ===")
+    print("="*80)
+    print(f"{'Level':<30} {'Multi-Enzyme':<12} {'Isoenzymes':<11} {'Complexes':<10} {'Promiscuous':<12} {'Description'}")
+    print("-" * 80)
+    print(f"{'1: Baseline GEM':<30} {'N/A':<12} {'N/A':<11} {'N/A':<10} {'N/A':<12} {'No enzyme constraints'}")
+    print(f"{'2: Single Enzyme':<30} {'✓ Enabled':<12} {'✗ Disabled':<11} {'✗ Disabled':<10} {'✗ Disabled':<12} {'Basic enzyme constraints only'}")
+    print(f"{'3a: + Isoenzymes':<30} {'✓ Enabled':<12} {'✓ Enabled':<11} {'✗ Disabled':<10} {'✗ Disabled':<12} {'+ OR-GPR handling'}")
+    print(f"{'3b: + Complexes':<30} {'✓ Enabled':<12} {'✗ Disabled':<11} {'✓ Enabled':<10} {'✗ Disabled':<12} {'+ AND-GPR handling'}")
+    print(f"{'3c: + Promiscuous':<30} {'✓ Enabled':<12} {'✗ Disabled':<11} {'✗ Disabled':<10} {'✓ Enabled':<12} {'+ Cross-reaction sharing'}")
+    print(f"{'4: All Constraints':<30} {'✓ Enabled':<12} {'✓ Enabled':<11} {'✓ Enabled':<10} {'✓ Enabled':<12} {'Complete kinGEMs'}")
+    print(f"{'5: Post-Tuned':<30} {'✓ Enabled':<12} {'✓ Enabled':<11} {'✓ Enabled':<10} {'✓ Enabled':<12} {'+ Optimized kcat values'}")
+    print("="*80)
+
     # Dictionary to store results
     fva_results = {}
     biomass_values = {}
@@ -462,8 +493,10 @@ def main():
     biomass_values['Level 1: Baseline GEM'] = biomass
     fva_df.to_csv(os.path.join(results_dir, 'level1_baseline.csv'), index=False)
 
-    # Memory cleanup after Level 1
-    gc.collect()
+    # ===================================================================
+    # Convert model to irreversible for all future computations
+    # ===================================================================
+    model = convert_to_irreversible(model)
 
     # ===================================================================
     # Level 2: Single Enzyme Constraint
@@ -476,9 +509,6 @@ def main():
     biomass_values['Level 2: Single Enzyme'] = biomass
     fva_df.to_csv(os.path.join(results_dir, 'level2_single_enzyme.csv'), index=False)
 
-    # Memory cleanup after Level 2
-    gc.collect()
-
     # ===================================================================
     # Level 3a: + Isoenzymes
     # ===================================================================
@@ -489,9 +519,6 @@ def main():
     fva_results['Level 3a: + Isoenzymes'] = fva_df
     biomass_values['Level 3a: + Isoenzymes'] = biomass
     fva_df.to_csv(os.path.join(results_dir, 'level3a_isoenzymes.csv'), index=False)
-
-    # Memory cleanup after Level 3a
-    gc.collect()
 
     # ===================================================================
     # Level 3b: + Complexes
@@ -504,9 +531,6 @@ def main():
     biomass_values['Level 3b: + Complexes'] = biomass
     fva_df.to_csv(os.path.join(results_dir, 'level3b_complexes.csv'), index=False)
 
-    # Memory cleanup after Level 3b
-    gc.collect()
-
     # ===================================================================
     # Level 3c: + Promiscuous
     # ===================================================================
@@ -518,9 +542,6 @@ def main():
     biomass_values['Level 3c: + Promiscuous'] = biomass
     fva_df.to_csv(os.path.join(results_dir, 'level3c_promiscuous.csv'), index=False)
 
-    # Memory cleanup after Level 3c
-    gc.collect()
-
     # ===================================================================
     # Level 4: All Constraints
     # ===================================================================
@@ -531,9 +552,6 @@ def main():
     fva_results['Level 4: All Constraints'] = fva_df
     biomass_values['Level 4: All Constraints'] = biomass
     fva_df.to_csv(os.path.join(results_dir, 'level4_all_constraints.csv'), index=False)
-
-    # Memory cleanup after Level 4
-    gc.collect()
 
     # ===================================================================
     # Level 5: Post-Tuned (if available or run tuning)
@@ -560,12 +578,8 @@ def main():
             output_dir=None,
             save_results=False,
             print_reaction_conditions=False,
-            verbose=True
+            verbose=False
         )
-
-        # Clean up optimization memory
-        del df_FBA  # Large result dataframe no longer needed
-        gc.collect()  # Force garbage collection
 
         # Run simulated annealing
         kcat_dict, top_targets, tuned_df, iterations, biomasses, df_FBA = simulated_annealing(
@@ -625,8 +639,6 @@ def main():
     print(f"Run ID: {run_id}")
     print(f"Results directory: {results_dir}")
     print("\nGenerated files:")
-    print("  - level1_baseline.csv")
-    print("  - level2_single_enzyme.csv")
     print("  - level1_baseline.csv")
     print("  - level2_single_enzyme.csv")
     print("  - level3a_isoenzymes.csv")
