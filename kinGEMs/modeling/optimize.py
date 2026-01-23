@@ -105,7 +105,7 @@ def run_optimization(
     tee=False,
     verbose=False,
     medium=None,
-    medium_upper_bound=False,
+    medium_upper_bound=True,
 ):
     """
     Enzyme-constrained FBA via Pyomo, handling:
@@ -584,15 +584,15 @@ def run_optimization(
 
     # DIAGNOSTIC: Print exchange reaction fluxes if medium was provided
     if medium is not None:
-        print("\n=== DIAGNOSTIC: Exchange reaction fluxes after optimization ===")
+        # print("\n=== DIAGNOSTIC: Exchange reaction fluxes after optimization ===")
         for rxn_id in medium.keys():
             flux_val = m.v[rxn_id].value if rxn_id in m.R else None
-            if flux_val is not None:
-                print(f"  {rxn_id}: flux = {flux_val:.4f} (bound was {medium[rxn_id]:.4f})")
-            else:
-                print(f"  {rxn_id}: NOT FOUND in optimization results")
-        print(f"Objective value: {sol_val:.6f}")
-        print("=== END DIAGNOSTIC ===\n")
+            # if flux_val is not None:
+            #     # print(f"  {rxn_id}: flux = {flux_val:.4f} (bound was {medium[rxn_id]:.4f})")
+            # else:
+                # print(f"  {rxn_id}: NOT FOUND in optimization results")
+        # print(f"Objective value: {sol_val:.6f}")
+        # print("=== END DIAGNOSTIC ===\n")
 
     return sol_val, df_FBA, gene_sequences_dict, m
 

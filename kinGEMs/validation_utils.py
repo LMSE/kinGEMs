@@ -734,8 +734,7 @@ def simulate_phenotype(
                             output_dir=None,
                             save_results=False,
                             print_reaction_conditions=False,
-                            verbose=False,
-                            bidirectional_constraints=True  # Explicitly enable for irreversible models
+                            verbose=False
                         )
                         # Use solution_value as the simulated growth value
                         if solution_value is None or np.isnan(solution_value):
@@ -808,10 +807,8 @@ def simulate_phenotype_flux(
                     else:
                         fluxes = np.zeros(n_rxns)
                     baseline_fluxes[g, e, :] = fluxes
-
-            # Reset carbon source safely
-            if carbon_ex_inds[e] != -1 and carbon_set:
-                reset_carbon_source_safely(model_run, carbon_ex_inds[e])
+            if carbon_ex_inds[e] != -1:
+                model_run.exchanges[carbon_ex_inds[e]].lower_bound = 0
 
     # Enzyme-constrained GEM flux simulation
     if 'kcat_mean' in processed_df.columns:
@@ -958,28 +955,39 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
 
     print(f"  🚀 Starting {mode} simulation: Gene {gene} × Carbon {carbon_name} (idx {carbon_idx})")
 
-    # Set up medium with safe bounds handling using irreversible format
+    # Apply medium bounds directly to the model (instead of passing to run_optimization)
+    # For irreversible models, _reverse reactions need upper_bound set (not lower_bound)
+    
+    # Set base medium components
     for e in medium_ex_inds:
         if e != -1:
             ex = model.exchanges[e]
-            # Allow uptake while preserving irreversible structure
-            # Convert to forward (0, UB_forward), reverse (0, -LB_original)
-            lb, ub = ex.lower_bound, ex.upper_bound
-            if ub <= 0:  # Uptake-only
-                ex.lower_bound = 0
-                ex.upper_bound = max(0, -lb)
-            else:  # Bidirectional or export
-                ex.lower_bound = 0
-                ex.upper_bound = max(ub, -lb if lb < 0 else 0)
-
-    # Set carbon source with safe bounds handling
-    carbon_set = False
+            reverse_id = ex.id + '_reverse'
+            
+            # Check if this exchange has a _reverse version (uptake-capable)
+            if reverse_id in [r.id for r in model.reactions]:
+                # Set _reverse reaction upper_bound for uptake
+                reverse_rxn = model.reactions.get_by_id(reverse_id)
+                reverse_rxn.upper_bound = 1000
+            elif ex.id.endswith('_reverse'):
+                # This IS the _reverse reaction
+                ex.upper_bound = 1000
+            else:
+                # Forward exchange only - set upper_bound for export
+                ex.upper_bound = 1000
+    
+    # Set carbon source (uptake via _reverse reaction)
     if carbon_ex_inds[carbon_idx] != -1:
-        carbon_set = set_carbon_source_safely(model, carbon_ex_inds[carbon_idx], -10)
-        if carbon_set:
-            print(f"    - Carbon source '{carbon_name}' set with safe bounds handling")
-        else:
-            print(f"    - Warning: Could not safely set carbon source '{carbon_name}'")
+        carbon_ex = model.exchanges[carbon_ex_inds[carbon_idx]]
+        carbon_reverse_id = carbon_ex.id + '_reverse' if not carbon_ex.id.endswith('_reverse') else carbon_ex.id
+        try:
+            carbon_reverse_rxn = model.reactions.get_by_id(carbon_reverse_id)
+            carbon_reverse_rxn.upper_bound = 10  # Specific carbon uptake rate
+            print(f"    - Medium configured with carbon source '{carbon_name}' (EX: {carbon_reverse_id}, UB=10)")
+        except KeyError:
+            print(f"    - Warning: Could not find carbon source exchange {carbon_reverse_id} for '{carbon_name}'")
+    else:
+        print(f"    - Warning: Could not find carbon source exchange for '{carbon_name}'")
 
     # Knockout gene
     try:
@@ -1019,6 +1027,7 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
                         print_reaction_conditions=False,
                         verbose=False,
                         solver_name=solver_name
+                        # NOTE: Don't pass medium - bounds already set on model directly
                     )
                 if wt_solution_value is None or np.isnan(wt_solution_value):
                     wt_solution_value = 0.0
@@ -1045,6 +1054,22 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
         print(f"    - After knockout: {len(active_reactions_after)} reactions still active")
         print(f"    ✅ Knockout verified: {len(knocked_out_reactions)} reactions set to bounds (0,0)")
 
+        # List knocked-out reactions with their bounds
+        if len(knocked_out_reactions) > 0:
+            print(f"    📋 Knocked-out reactions ({len(knocked_out_reactions)}):")
+            for rxn in knocked_out_reactions[:5]:  # Show first 5 to avoid excessive output
+                print(f"       • {rxn.id}: bounds = {rxn.bounds}")
+            if len(knocked_out_reactions) > 5:
+                print(f"       ... and {len(knocked_out_reactions) - 5} more")
+
+        # List reactions that remain active (potential GPR issues)
+        if len(active_reactions_after) > 0:
+            print(f"    ⚠️  Reactions still active after knockout ({len(active_reactions_after)}):")
+            for rxn in active_reactions_after[:5]:  # Show first 5
+                print(f"       • {rxn.id}: bounds = {rxn.bounds}, GPR = {rxn.gene_reaction_rule}")
+            if len(active_reactions_after) > 5:
+                print(f"       ... and {len(active_reactions_after) - 5} more")
+
         # Additional verification: check if knockout had any effect
         if len(knocked_out_reactions) == 0 and len(reactions_before) > 0:
             print("    ⚠️  Warning: Gene knockout may not have affected any reactions!")
@@ -1057,6 +1082,20 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
 
     # Simulate growth
     if mode == 'baseline':
+        # For baseline mode, apply medium directly to model bounds
+        print(f"    - Applying medium configuration for baseline ({len(medium)} exchanges)")
+        for ex_id, flux_value in medium.items():
+            try:
+                ex_rxn = model.reactions.get_by_id(ex_id)
+                # For _reverse reactions, set upper bound (positive = uptake capacity)
+                # For forward reactions, set bounds appropriately
+                if ex_id.endswith('_reverse'):
+                    ex_rxn.upper_bound = flux_value  # Positive upper bound for uptake
+                else:
+                    ex_rxn.lower_bound = -flux_value  # Negative lower bound for uptake
+            except KeyError:
+                print(f"    - Warning: Exchange {ex_id} not found in model")
+        
         print(f"    - Running baseline GEM simulation for gene {gene}, carbon {carbon_idx}")
         try:
             with time_limit(300, f"Baseline optimization for {gene}"):
@@ -1108,11 +1147,22 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
     else:  # enzyme-constrained
         print(f"    🔬 Running enzyme-constrained GEM simulation for gene {gene}, carbon {carbon_idx}")
         try:
+            # CRITICAL FIX: Remove knocked-out gene from enzyme constraint dataframe
+            # This ensures the enzyme variable E[gene] is not created in optimization
+            # and the protein pool capacity is reduced appropriately
+            processed_df_knockout = processed_df[processed_df['Single_gene'] != gene].copy()
+            
+            # Log the filtering for verification
+            n_original = len(processed_df)
+            n_filtered = len(processed_df_knockout)
+            if n_original != n_filtered:
+                print(f"    - Filtered enzyme data: removed gene {gene} ({n_original} → {n_filtered} entries)")
+            
             # Try with the provided solver first
             with time_limit(600, f"Enzyme-constrained optimization for {gene}"):
                 solution_value, _, _, _ = run_optimization_with_dataframe(
                     model=model,
-                    processed_df=processed_df,
+                    processed_df=processed_df_knockout,  # Use filtered dataframe
                     objective_reaction=objective_reaction,
                     enzyme_upper_bound=enzyme_upper_bound,
                     enzyme_ratio=True,
@@ -1125,7 +1175,8 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
                     save_results=False,
                     print_reaction_conditions=False,
                     verbose=False,
-                    solver_name=solver_name
+                    solver_name=solver_name,
+                    # Medium bounds already applied directly to model above
                 )
             if solution_value is None or np.isnan(solution_value):
                 solution_value = 0.0
@@ -1174,7 +1225,7 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
                     with time_limit(300, f"CPLEX retry for {gene}"):
                         solution_value, _, _, _ = run_optimization_with_dataframe(
                             model=model,
-                            processed_df=processed_df,
+                            processed_df=processed_df_knockout,  # Use filtered dataframe
                             objective_reaction=objective_reaction,
                             enzyme_upper_bound=enzyme_upper_bound,
                             enzyme_ratio=True,
@@ -1187,7 +1238,8 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
                             save_results=False,
                             print_reaction_conditions=False,
                             verbose=False,
-                            solver_name='cplex'
+                            solver_name='cplex',
+                            # Medium bounds already applied directly to model above
                         )
                     if solution_value is None or np.isnan(solution_value):
                         solution_value = 0.0
@@ -1234,7 +1286,7 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
                     with time_limit(600, f"CPLEX retry for {gene}"):
                         solution_value, _, _, _ = run_optimization_with_dataframe(
                         model=model,
-                        processed_df=processed_df,
+                        processed_df=processed_df_knockout,  # Use filtered dataframe
                         objective_reaction=objective_reaction,
                         enzyme_upper_bound=enzyme_upper_bound,
                         enzyme_ratio=True,
@@ -1247,7 +1299,9 @@ def _simulate_gene_carbon(model, processed_df, gene, carbon_idx, carbon_name,
                         save_results=False,
                         print_reaction_conditions=False,
                         verbose=False,
-                        solver_name='cplex'
+                        solver_name='cplex',
+                        medium=medium,  # Pass medium dictionary
+                        medium_upper_bound=True  # Use upper bound convention for _reverse reactions
                     )
                     if solution_value is None or np.isnan(solution_value):
                         solution_value = 0.0

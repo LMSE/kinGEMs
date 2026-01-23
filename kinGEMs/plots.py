@@ -17,9 +17,43 @@ from scipy.stats import pearsonr, spearmanr
 from .config import ensure_dir_exists
 
 
+# ============================================================================
+# GLOBAL PLOT CONFIGURATION
+# ============================================================================
+
+# FVA Ablation Level Colors - Consistent across all plots
+FVA_LEVEL_COLORS = {
+    'Level 1: Baseline GEM': '#1f77b4',
+    'Level 2: Single Enzyme': '#ff7f0e',
+    'Level 3a: + Isoenzymes': '#2ca02c',
+    'Level 3b: + Complexes': '#d62728',
+    'Level 3c: + Promiscuous': '#9467bd',
+    'Level 4: All Constraints': '#8c564b',
+    'Level 5: Post-Tuned': '#e377c2'
+}
+
+# Font sizes - Consistent across all plots
+FONT_SIZES = {
+    'title': 16,
+    'subtitle': 14,
+    'axis_label': 13,
+    'tick_label': 12,
+    'legend': 12,
+    'annotation': 10
+}
+
+# Default figure settings
+DEFAULT_DPI = 300
+DEFAULT_FIGSIZE_SINGLE = (12, 8)
+DEFAULT_FIGSIZE_WIDE = (14, 8)
+DEFAULT_FIGSIZE_COMPACT = (10, 6)
+
+# ============================================================================
+
+
 def set_plotting_style(style="whitegrid"):
     """
-    Set a consistent style for all plots.
+    Set a consistent style for all plots using global configuration.
 
     Parameters
     ----------
@@ -31,12 +65,12 @@ def set_plotting_style(style="whitegrid"):
     None
     """
     sns.set_style(style)
-    plt.rcParams['font.size'] = 12
-    plt.rcParams['axes.labelsize'] = 14
-    plt.rcParams['axes.titlesize'] = 16
-    plt.rcParams['xtick.labelsize'] = 12
-    plt.rcParams['ytick.labelsize'] = 12
-    plt.rcParams['legend.fontsize'] = 12
+    plt.rcParams['font.size'] = FONT_SIZES['tick_label']
+    plt.rcParams['axes.labelsize'] = FONT_SIZES['axis_label']
+    plt.rcParams['axes.titlesize'] = FONT_SIZES['title']
+    plt.rcParams['xtick.labelsize'] = FONT_SIZES['tick_label']
+    plt.rcParams['ytick.labelsize'] = FONT_SIZES['tick_label']
+    plt.rcParams['legend.fontsize'] = FONT_SIZES['legend']
 
 def plot_flux_distribution(df_FBA, n_reactions=20, output_path=None, figsize=(12, 8),
                           show=False, absolute=True, exclude_exchanges=True):
@@ -922,17 +956,6 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
     """
     set_plotting_style()
 
-    # Define colors for each level
-    colors = {
-        'Level 1: Baseline GEM': '#1f77b4',
-        'Level 2: Single Enzyme': '#ff7f0e',
-        'Level 3a: + Isoenzymes': '#2ca02c',
-        'Level 3b: + Complexes': '#d62728',
-        'Level 3c: + Promiscuous': '#9467bd',
-        'Level 4: All Constraints': '#8c564b',
-        'Level 5: Post-Tuned': '#e377c2'
-    }
-
     if enhanced:
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, height_ratios=[3, 1])
     else:
@@ -954,7 +977,7 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
         cumulative = np.arange(1, len(fvi_sorted) + 1) / len(fvi_sorted)
 
         ax1.plot(fvi_sorted, cumulative, label=label,
-                color=colors.get(label, None), linewidth=2.5)
+                color=FVA_LEVEL_COLORS.get(label, None), linewidth=2.5)
 
         # Store stats for bottom plot
         if enhanced:
@@ -969,7 +992,11 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
 
     # Format main plot
     ax1.set_xscale('log')
-    ax1.set_xlim(1e-6, 1e3)
+    # Set x-axis limits based on actual data range
+    if len(all_fvi_values) > 0:
+        x_min = max(min(all_fvi_values), 1e-15)  # Avoid log(0)
+        x_max = max(all_fvi_values)
+        ax1.set_xlim(max(x_min, 1e-5), x_max)  # Add some padding
     ax1.set_ylim(0, 1)
     ax1.set_xlabel('Flux Variability (FVi)', fontsize=13)
     ax1.set_ylabel('Cumulative Probability', fontsize=13)
@@ -986,27 +1013,28 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
 
         # Create bar chart for Median FVi
         x_pos = np.arange(len(labels))
-        bars = ax2.bar(x_pos, median_fvis, color=[colors.get(label, '#1f77b4') for label in labels], alpha=0.7)
+        bars = ax2.bar(x_pos, median_fvis, color=[FVA_LEVEL_COLORS.get(label, '#1f77b4') for label in labels], alpha=0.7)
 
         # Set up left y-axis for Median FVi
-        ax2.set_ylabel('Median FVi', fontsize=13)
+        ax2.set_ylabel('Median FVi', fontsize=FONT_SIZES['axis_label'])
         ax2.set_yscale('log')
         ax2.set_ylim(bottom=1e-6)
         ax2.set_xticks(x_pos)
         ax2.set_xticklabels([label.replace('Level ', 'L').replace(': ', '\n') for label in labels],
-                           rotation=45, ha='right', fontsize=10)
+                           rotation=45, ha='right', fontsize=FONT_SIZES['annotation'])
 
         # Create second y-axis for biomass
         ax2_biomass = ax2.twinx()
         line = ax2_biomass.plot(x_pos, biomass_values, 'ko-', linewidth=2, markersize=6, label='Biomass')
-        ax2_biomass.set_ylabel('Biomass (1/hr)', fontsize=13)
+        ax2_biomass.set_ylabel('Biomass (1/hr)', fontsize=FONT_SIZES['axis_label'])
         ax2_biomass.set_ylim(0, max(biomass_values) * 1.1)
 
         # Add subplot title
-        ax2.set_title('Mean Flux Variability and Biomass by Constraint Level', fontsize=12, fontweight='bold')
+        ax2.set_title('Mean Flux Variability and Biomass by Constraint Level', fontsize=FONT_SIZES['subtitle'], fontweight='bold')
 
-        # Adjust layout
+        # Adjust layout with extra bottom space for rotated labels
         plt.tight_layout()
+        plt.subplots_adjust(bottom=0.15)
 
     # Save if output path provided
     if output_path:
@@ -1055,16 +1083,6 @@ def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
     labels = []
     colors_list = []
 
-    colors = {
-        'Level 1: Baseline GEM': '#1f77b4',
-        'Level 2: Single Enzyme': '#ff7f0e',
-        'Level 3a: + Isoenzymes': '#2ca02c',
-        'Level 3b: + Complexes': '#d62728',
-        'Level 3c: + Promiscuous': '#9467bd',
-        'Level 4: All Constraints': '#8c564b',
-        'Level 5: Post-Tuned': '#e377c2'
-    }
-
     for label, fva_df in fva_results_dict.items():
         fvi = calculate_flux_metrics(fva_df)
         # Use log scale for better visualization, filter zeros
@@ -1072,7 +1090,7 @@ def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
         if len(fvi_nonzero) > 0:
             fvi_data.append(np.log10(fvi_nonzero))
             labels.append(label.replace('Level ', 'L').replace(': ', '\n'))
-            colors_list.append(colors[label])
+            colors_list.append(FVA_LEVEL_COLORS[label])
 
     bp = ax.boxplot(fvi_data, labels=labels, patch_artist=True, showfliers=False)
 
@@ -1080,11 +1098,109 @@ def plot_fva_ablation_boxplot(fva_results_dict, model_name, output_path=None,
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
 
-    ax.set_ylabel('log₁₀(FVi)', fontsize=12)
-    ax.set_title(f'{model_name}: Distribution of Flux Variability (FVi) by Constraint Level', fontsize=14)
+    ax.set_ylabel('log₁₀(FVi)', fontsize=FONT_SIZES['axis_label'])
+    ax.set_title(f'{model_name}: Distribution of Flux Variability (FVi) by Constraint Level', fontsize=FONT_SIZES['subtitle'])
     ax.grid(True, alpha=0.3, axis='y')
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
+
+    # Save if output path provided
+    if output_path:
+        ensure_dir_exists(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+
+    # Show if requested
+    if show:
+        plt.show()
+
+    return fig
+
+
+def plot_fva_ablation_violin(fva_results_dict, model_name, output_path=None,
+                            figsize=(14, 8), show=False):
+    """
+    Create violin plot of FVi distributions for FVA ablation study.
+
+    Violin plots show the full distribution shape (like a rotated kernel density plot)
+    combined with a box plot, providing more detail than box plots alone.
+
+    For irreversible models, split reactions (forward and reverse) are automatically
+    combined before plotting, ensuring fair comparison across baseline and enzyme-
+    constrained models.
+
+    Parameters
+    ----------
+    fva_results_dict : dict
+        Dictionary with level labels as keys and FVA DataFrames as values
+    model_name : str
+        Name of the model for plot title
+    output_path : str, optional
+        Path to save the figure
+    figsize : tuple, optional
+        Figure size (width, height)
+    show : bool, optional
+        Whether to display the plot
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The plot figure
+    """
+    set_plotting_style()
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Prepare data for violin plot
+    data_for_plot = []
+    labels = []
+
+    for label, fva_df in fva_results_dict.items():
+        fvi = calculate_flux_metrics(fva_df)
+        # Use log10 for better visualization, filter zeros
+        fvi_nonzero = fvi[fvi > 1e-15]
+        if len(fvi_nonzero) > 0:
+            log_fvi = np.log10(fvi_nonzero)
+            data_for_plot.append(log_fvi)
+            labels.append(label.replace('Level ', 'L').replace(': ', '\n'))
+
+    # Create violin plot
+    parts = ax.violinplot(data_for_plot, positions=range(len(labels)), 
+                         showmeans=True, showmedians=True, widths=0.7)
+
+    # Color the violin plots
+    for i, pc in enumerate(parts['bodies']):
+        label_key = list(fva_results_dict.keys())[i]
+        pc.set_facecolor(FVA_LEVEL_COLORS.get(label_key, '#1f77b4'))
+        pc.set_alpha(0.7)
+        pc.set_edgecolor('black')
+        pc.set_linewidth(1)
+
+    # Style the other elements
+    for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians', 'cmeans'):
+        if partname in parts:
+            vp = parts[partname]
+            vp.set_edgecolor('black')
+            vp.set_linewidth(1.5)
+
+    # Customize plot
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=FONT_SIZES['tick_label'])
+    ax.set_ylabel('log₁₀(FVi)', fontsize=FONT_SIZES['axis_label'] + 2)
+    ax.set_title(f'{model_name}: Distribution of Flux Variability (FVi) by Constraint Level', 
+                fontsize=FONT_SIZES['title'], fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='y')
+    ax.tick_params(axis='y', labelsize=FONT_SIZES['tick_label'])
+    
+    # Add legend explaining violin plot elements
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], color='black', linewidth=1.5, label='Median'),
+        Line2D([0], [0], color='black', linewidth=1.5, linestyle='--', label='Mean'),
+    ]
+    ax.legend(handles=legend_elements, loc='lower right', fontsize=FONT_SIZES['legend'])
+    
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)
 
     # Save if output path provided
     if output_path:
@@ -1300,7 +1416,15 @@ def create_fva_ablation_dashboard(fva_results_dict, biomass_dict, model_name,
     )
     results['boxplot'] = boxplot_fig
 
-    # 3. Biomass progression plot
+    # 3. Violin plot of FVi distributions
+    violin_fig = plot_fva_ablation_violin(
+        fva_results_dict, model_name,
+        output_path=os.path.join(output_dir, f'{prefix}_violinplot.png'),
+        show=show
+    )
+    results['violinplot'] = violin_fig
+
+    # 4. Biomass progression plot
     biomass_fig = plot_biomass_progression(
         fva_results_dict, biomass_dict, model_name,
         output_path=os.path.join(output_dir, f'{prefix}_biomass_progression.png'),
@@ -1308,7 +1432,7 @@ def create_fva_ablation_dashboard(fva_results_dict, biomass_dict, model_name,
     )
     results['biomass_plot'] = biomass_fig
 
-    # 4. Summary statistics
+    # 5. Summary statistics
     summary_df = generate_fva_ablation_summary_statistics(
         fva_results_dict, biomass_dict,
         output_path=os.path.join(output_dir, f'{prefix}_summary.csv')
@@ -1322,6 +1446,7 @@ def create_fva_ablation_dashboard(fva_results_dict, biomass_dict, model_name,
     print("Generated files:")
     print(f"  - {prefix}_cumulative.png (enhanced plot)")
     print(f"  - {prefix}_boxplot.png (distribution analysis)")
+    print(f"  - {prefix}_violinplot.png (distribution shape visualization)")
     print(f"  - {prefix}_biomass_progression.png (biomass vs constraints)")
     print(f"  - {prefix}_summary.csv (summary statistics)")
 
