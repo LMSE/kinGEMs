@@ -1898,6 +1898,7 @@ def plot_fva_mfa_comparison_normalized(
             plt.show()
         else:
             plt.close(fig)
+
 def plot_fva_mfa_comparison_zoom_with_jaccard_table(
     models_data: dict[str, pd.DataFrame],
     rxn_ids: list[str] | None = None,
@@ -2111,6 +2112,156 @@ def plot_fva_mfa_comparison_zoom_with_jaccard_table(
     else:
         plt.close(fig)
 
+def plot_fva_mfa_comparison_zoom(
+    models_data: dict[str, pd.DataFrame],
+    rxn_ids: list[str] | None = None,
+    output_path: str | None = None,
+    show: bool = True,
+    fig_w: float = 7.0,        # narrower for side-by-side
+    fig_h: float = 8.0,        # match your stacked plot height
+    show_legend: bool = True,  # set False to remove legend completely
+) -> None:
+    """
+    Zoomed MFA vs FVA range comparison for a small set of reactions.
+
+    Paper-friendly version:
+      - No intersection/union annotations
+      - No I/U legend
+      - Optional: remove model legend entirely
+      - More compact figure width for side-by-side layouts
+    """
+    set_plotting_style()
+
+    if not models_data:
+        raise ValueError("models_data is empty")
+
+    if rxn_ids is None:
+        rxn_ids = ["EX_ac_e", "PPCK", "ME1"]
+
+    primary_name = 'COBRA FVA' if 'COBRA FVA' in models_data else next(iter(models_data))
+    master_df = models_data[primary_name].copy()
+
+    required_master = {'rxn_id', 'mfa_lb', 'mfa_ub'}
+    missing = required_master - set(master_df.columns)
+    if missing:
+        raise ValueError(f"Master dataframe missing columns: {missing}")
+
+    master_df = master_df.dropna(subset=['mfa_lb', 'mfa_ub'])
+    present = set(master_df['rxn_id'].astype(str).unique())
+    rxn_ids = [r for r in rxn_ids if r in present]
+    if len(rxn_ids) == 0:
+        raise ValueError("None of the requested rxn_ids were found with valid MFA bounds in master_df.")
+
+    ordered_models, model_color_map = _order_models(models_data)
+
+    # spacing between reactions
+    band_height = 1.35  # >1 = more space between reactions
+    # Offsets relative to reaction center (top → bottom)
+    band_offsets = [0.30, 0.10, -0.10, -0.30]
+
+    # Fixed paper-friendly size
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    lw_mfa = 9
+    lw_fva = 9
+
+    xmins, xmaxs = [], []
+
+    for i, rxn in enumerate(rxn_ids):
+        row = master_df[master_df['rxn_id'] == rxn]
+        if row.empty:
+            continue
+        row0 = row.iloc[0]
+        mfa_lb = float(row0['mfa_lb'])
+        mfa_ub = float(row0['mfa_ub'])
+        xmins.append(mfa_lb); xmaxs.append(mfa_ub)
+
+        y_center = i * band_height + 0.5 * band_height
+
+        # MFA
+        ax.hlines(
+            y=y_center + band_offsets[0],
+            xmin=mfa_lb,
+            xmax=mfa_ub,
+            color='black',
+            linewidth=lw_mfa,
+            capstyle='round',
+            alpha=0.9,
+            zorder=10,
+            label='MFA' if (i == 0 and show_legend) else ""
+        )
+
+        # FVA for models
+        for model_idx, (label, df) in enumerate(ordered_models):
+            if not {'rxn_id', 'fva_lb', 'fva_ub'}.issubset(df.columns):
+                continue
+            model_row = df[df['rxn_id'] == rxn]
+            if model_row.empty:
+                continue
+
+            fva_lb = float(model_row.iloc[0]['fva_lb'])
+            fva_ub = float(model_row.iloc[0]['fva_ub'])
+            xmins.append(fva_lb); xmaxs.append(fva_ub)
+
+            pos_idx = min(model_idx + 1, len(band_offsets) - 1)
+            y_line = y_center + band_offsets[pos_idx]
+
+            ax.hlines(
+                y=y_line,
+                xmin=fva_lb,
+                xmax=fva_ub,
+                color=model_color_map.get(label, '#777777'),
+                linewidth=lw_fva,
+                capstyle='round',
+                alpha=0.9,
+                label=label if (i == 0 and show_legend) else ""
+            )
+
+    # ---- Y formatting ----
+    ax.set_yticks([i * band_height + 0.5 * band_height for i in range(len(rxn_ids))])
+    ax.set_yticklabels(rxn_ids, fontsize=FONT_SIZES['tick_label'], fontfamily='monospace')
+    ax.set_ylim(0, len(rxn_ids) * band_height)
+    ax.invert_yaxis()
+
+    # separators
+    for i in range(len(rxn_ids) + 1):
+        ax.axhline(i * band_height, color='black', linewidth=1, alpha=0.18, zorder=0)
+
+    # ---- X formatting ----
+    ax.set_xlabel('Flux (mmol/gDW/h)', fontsize=FONT_SIZES['axis_label'])
+    ax.set_title('MFA vs FVA Range Comparison', fontsize=FONT_SIZES['title'])
+    ax.grid(False)
+
+    # xlim start at 0, modest right pad (no extra pad for text now)
+    if xmaxs:
+        xmax = max(xmaxs)
+        pad = 0.06 * xmax if xmax > 0 else 1.0
+        ax.set_xlim(0, xmax + pad)
+
+    # ---- Optional legend (ranges only) ----
+    if show_legend:
+        handles = [mlines.Line2D([], [], color='black', linewidth=lw_mfa, label='MFA')]
+        for label, _ in ordered_models:
+            handles.append(
+                mlines.Line2D(
+                    [], [], color=model_color_map.get(label, '#777777'),
+                    linewidth=lw_fva, label=label
+                )
+            )
+        ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=FONT_SIZES['legend'])
+
+    plt.tight_layout()
+
+    if output_path:
+        _safe_ensure_dir_for_file(output_path)
+        fig.savefig(output_path, dpi=DEFAULT_DPI, bbox_inches="tight")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
 
 
 def plot_jaccard_index_comparison(
@@ -2260,6 +2411,238 @@ def plot_jaccard_index_comparison(
 
     # Tight layout with room for suptitle; no legend
     plt.tight_layout(rect=[0, 0, 1, 0.9])
+
+    if output_path:
+        _safe_ensure_dir_for_file(output_path)
+        plt.savefig(output_path, dpi=DEFAULT_DPI, bbox_inches="tight")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+def plot_jaccard_index_comparison_stacked(
+    jaccard_distributions: list[list[float]] | dict[str, list[float]],
+    zero_overlaps: list[int] | dict[str, int],
+    model_names: list[str] | None = None,
+    output_path: str | None = None,
+    show: bool = True,
+    n_total: list[int] | None = None,
+) -> None:
+    set_plotting_style()
+
+    # ----------------------------
+    # Normalize inputs to lists aligned with model_names
+    # ----------------------------
+    if isinstance(jaccard_distributions, dict):
+        if model_names is None:
+            model_names = list(jaccard_distributions.keys())
+        jaccard_dists_list = [list(map(float, jaccard_distributions[m])) for m in model_names]
+    else:
+        if model_names is None:
+            model_names = [f"Model {i+1}" for i in range(len(jaccard_distributions))]
+        jaccard_dists_list = [list(map(float, xs)) for xs in jaccard_distributions]
+
+    if isinstance(zero_overlaps, dict):
+        zero_overlaps_list = [int(zero_overlaps[m]) for m in model_names]
+    else:
+        zero_overlaps_list = [int(v) for v in zero_overlaps]
+
+    if not (len(jaccard_dists_list) == len(zero_overlaps_list) == len(model_names)):
+        raise ValueError("jaccard_distributions, zero_overlaps, and model_names must have same length")
+
+    if n_total is not None and len(n_total) != len(model_names):
+        raise ValueError("n_total must be None or have the same length as model_names")
+
+    # ----------------------------
+    # Mapping + dedup + ordering
+    # ----------------------------
+    model_label_map = {
+        "COBRA FVA": "Baseline GEM",
+        "kinGEMs FVA (pre-tuning)": "kinGEMs (Pre-Tuning)",
+        "kinGEMs FVA": "kinGEMs (Post-Tuning)",
+        "COBRA FVA (pre-tuning)": "Baseline GEM (Pre-Tuning Cobra)",
+    }
+    model_color_map = {
+        "Baseline GEM": "#1f77b4",
+        "Baseline GEM (Pre-Tuning Cobra)": "#1f77b4",
+        "kinGEMs (Pre-Tuning)": "#8c564b",
+        "kinGEMs (Post-Tuning)": "#e377c2",
+    }
+
+    mapped_names = [model_label_map.get(n, n) for n in model_names]
+
+    # Deduplicate after mapping (keep first)
+    seen = set()
+    keep_idx = []
+    for i, name in enumerate(mapped_names):
+        if name in seen:
+            continue
+        seen.add(name)
+        keep_idx.append(i)
+
+    if len(keep_idx) != len(mapped_names):
+        dropped = [mapped_names[i] for i in range(len(mapped_names)) if i not in keep_idx]
+        print(
+            "[plot_jaccard_index_comparison_stacked] Warning: duplicate model labels after mapping. "
+            f"Dropping duplicates: {dropped}"
+        )
+
+    mapped_names = [mapped_names[i] for i in keep_idx]
+    jaccard_dists_list = [jaccard_dists_list[i] for i in keep_idx]
+    zero_overlaps_list = [zero_overlaps_list[i] for i in keep_idx]
+    if n_total is not None:
+        n_total = [int(n_total[i]) for i in keep_idx]
+
+    # Canonical order
+    desired_order = ["Baseline GEM", "kinGEMs (Pre-Tuning)", "kinGEMs (Post-Tuning)"]
+    order_index = {name: i for i, name in enumerate(desired_order)}
+    sort_idx = sorted(range(len(mapped_names)), key=lambda i: order_index.get(mapped_names[i], 999))
+
+    mapped_names = [mapped_names[i] for i in sort_idx]
+    jaccard_dists_list = [jaccard_dists_list[i] for i in sort_idx]
+    zero_overlaps_list = [zero_overlaps_list[i] for i in sort_idx]
+    if n_total is not None:
+        n_total = [n_total[i] for i in sort_idx]
+
+    # Colors
+    default_colors = ["#1f77b4", "#8c564b", "#e377c2", "#2ca02c", "#d62728", "#9467bd", "#7f7f7f"]
+    colors = [
+        model_color_map.get(name, default_colors[i % len(default_colors)])
+        for i, name in enumerate(mapped_names)
+    ]
+
+    # ----------------------------
+    # X spacing (bring categories closer)
+    # ----------------------------
+    x_step = 1.1
+    x = np.arange(len(mapped_names)) * x_step
+    bar_w = 0.62
+    box_w = 0.62
+
+    # ----------------------------
+    # Layout: stacked (condensed + more vertical space between panels)
+    # ----------------------------
+    fig_w = 8.4  # narrower than before
+    fig_h = 8.0
+    fig, (ax_j, ax_z) = plt.subplots(
+        2, 1,
+        figsize=(fig_w, fig_h),
+        sharex=True,
+        gridspec_kw={"height_ratios": [1.2, 1.0], "hspace": 0.30}  # more space between subplots
+    )
+
+    # ----------------------------
+    # Top: boxplot + jitter markers (points match model colors)
+    # ----------------------------
+    bp = ax_j.boxplot(
+        jaccard_dists_list,
+        positions=x,
+        widths=box_w,
+        patch_artist=True,
+        showfliers=False,
+        medianprops={"color": "black", "linewidth": 1.5},
+        whiskerprops={"color": "black", "linewidth": 1},
+        capprops={"color": "black", "linewidth": 1},
+        boxprops={"edgecolor": "black", "linewidth": 1},
+    )
+
+    for i, box in enumerate(bp["boxes"]):
+        box.set_facecolor(colors[i])
+        box.set_alpha(0.75)
+
+    ax_j.set_ylabel("Jaccard Index (↑ better)", fontsize=FONT_SIZES["axis_label"])
+    ax_j.set_yscale("symlog", linthresh=0.01)
+    ax_j.grid(axis="y", linestyle="--", alpha=0.25)
+
+    all_vals = [v for sub in jaccard_dists_list for v in sub]
+    ymax = max(0.05, (max(all_vals) * 1.15) if all_vals else 0.05)
+    ax_j.set_ylim(0, ymax)
+
+    rng = np.random.default_rng(0)
+    for i, vals in enumerate(jaccard_dists_list):
+        if not vals:
+            continue
+
+        jitter = rng.normal(loc=0.0, scale=0.06, size=len(vals))
+        xs = np.full(len(vals), x[i]) + jitter
+
+        # points colored per model
+        ax_j.scatter(
+            xs, vals,
+            s=22,
+            alpha=0.55,
+            color=colors[i],
+            edgecolors="none",
+            zorder=3
+        )
+
+        # place mean label ABOVE the box/whiskers
+        mean_v = float(np.mean(vals))
+        q1, q3 = np.percentile(vals, [25, 75])
+        iqr = q3 - q1
+        upper_whisker = min(max(vals), q3 + 1.5 * iqr)
+        y_text = min(ymax * 0.98, upper_whisker + 0.02 * ymax)
+
+        ax_j.text(
+            x[i], y_text,
+            f"{mean_v:.3f}",
+            ha="center", va="bottom",
+            fontsize=FONT_SIZES["annotation"],
+            zorder=6
+        )
+
+    # ----------------------------
+    # Bottom: bars
+    # ----------------------------
+    bars_z = ax_z.bar(
+        x, zero_overlaps_list,
+        width=bar_w,
+        color=colors,
+        alpha=0.85,
+        edgecolor="black",
+        linewidth=1
+    )
+
+    ax_z.set_ylabel("# Disjoint Reactions (↓ better)", fontsize=FONT_SIZES["axis_label"])
+    ax_z.grid(axis="y", linestyle="--", alpha=0.3)
+
+    max_z = max(zero_overlaps_list) if zero_overlaps_list else 1
+    ax_z.set_ylim(0, max(1, int(max_z * 1.15) + 1))
+
+    for bar in bars_z:
+        h = bar.get_height()
+        ax_z.text(
+            bar.get_x() + bar.get_width() / 2,
+            h,
+            f"{int(h)}",
+            ha="center",
+            va="bottom",
+            fontsize=FONT_SIZES["annotation"]
+        )
+
+    ax_z.set_xticks(x)
+    ax_z.set_xticklabels(mapped_names, fontsize=FONT_SIZES["tick_label"], rotation=0)
+
+    # ----------------------------
+    # Figure-level title (lower than before)
+    # ----------------------------
+    title_n = None
+    if n_total is not None and len(n_total) > 0 and all(v == n_total[0] for v in n_total):
+        title_n = n_total[0]
+
+    fig.suptitle(
+        f"Over {title_n} Reactions" if title_n is not None else "Over Reactions",
+        fontsize=FONT_SIZES["subtitle"],
+        y=0.93
+    )
+
+    # Layout first, then align y-label x-positions exactly across both axes
+    plt.tight_layout(rect=[0, 0, 1, 0.94])
+
+    fig.canvas.draw()
+    ax_j.yaxis.set_label_coords(-0.085, 0.5)
+    ax_z.yaxis.set_label_coords(-0.085, 0.5)
 
     if output_path:
         _safe_ensure_dir_for_file(output_path)

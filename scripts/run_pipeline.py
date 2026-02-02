@@ -276,7 +276,7 @@ def run_pipeline_core(
     config : dict
         Configuration dictionary
     output_dir : str
-        Directory to save pipeline outputs 
+        Directory to save pipeline outputs
     run_id : str
         Unique identifier for this run
     force_regenerate : bool
@@ -443,7 +443,7 @@ def run_pipeline_core(
         verbose=False,
         solver_name=solver_name,
         medium=medium,
-        medium_upper_bound=medium_upper_bound
+        medium_upper_bound=medium_upper_bound,
     )
     log(f"  kinGEMs biomass: {solution_value:.4f}")
 
@@ -714,6 +714,8 @@ def main():
     enable_fva = config.get('enable_fva', False)
     enable_biolog = config.get('enable_biolog_validation', False)
     solver_name = config.get('solver', 'glpk')  # Default to GLPK (free solver)
+    edit_ngam = config.get('edit_ngam', False)
+    ngam_rxn_id = config.get('ngam_rxn_id', 'ATPM')
 
     # Detect model type
     is_modelseed = is_modelseed_model(model_name)
@@ -951,7 +953,9 @@ def main():
         verbose=False,
         solver_name=solver_name,
         medium=medium_temp,
-        medium_upper_bound=medium_upper_bound_temp
+        medium_upper_bound=medium_upper_bound_temp,
+        edit_ngam=edit_ngam,
+        ngam_rxn_id=ngam_rxn_id
     )
     print(f"    kinGEMs biomass: {solution_value:.4f}")
 
@@ -971,6 +975,9 @@ def main():
     else:
         print("  Using standard model - may need additional constraint processing")
         constraint_data = processed_data
+
+    # DELETE AFTER DEBUG
+    print("Model ATPM value:", model.reactions.get_by_id('ATPM').bounds)
 
     # === Step 5: Simulated Annealing ===
     print("\n=== Step 5: Running simulated annealing ===")
@@ -1018,7 +1025,9 @@ def main():
         change_threshold=change_threshold,
         verbose=verbose,
         medium=medium,
-        medium_upper_bound=medium_upper_bound
+        medium_upper_bound=medium_upper_bound,
+        edit_ngam=edit_ngam,
+        ngam_rxn_id=ngam_rxn_id
     )
 
     improvement = (biomasses[-1] - biomasses[0]) / biomasses[0] * 100 if biomasses[0] > 0 else 0

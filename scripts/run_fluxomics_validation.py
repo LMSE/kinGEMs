@@ -104,9 +104,10 @@ from kinGEMs.fluxomics_validation import (
 )
 from kinGEMs.plots import (
     plot_fva_mfa_comparison,
-    plot_fva_mfa_comparison_zoom_with_jaccard_table,
+    plot_fva_mfa_comparison_zoom,
     plot_fva_mfa_comparison_normalized,
     plot_jaccard_index_comparison,
+    plot_jaccard_index_comparison_stacked,
     plot_jaccard_index_comparison_overlapping
 )
 
@@ -285,6 +286,39 @@ def run_fluxomics_analysis(
     )
     logger.info("Saved Jaccard index (overlapping only) plot: %s", jaccard_overlap_plot_path)
 
+    # --- Stacked Jaccard plot (boxplot + jitter) ---
+    # Each jaccard_df should contain per-reaction Jaccard values.
+    # Try common column names; adjust if yours differs.
+    jaccard_distributions = {}
+    for (model, _, _, df) in jaccard_info:
+        if "jaccard" in df.columns:
+            vals = df["jaccard"].dropna().astype(float).tolist()
+        elif "jaccard_index" in df.columns:
+            vals = df["jaccard_index"].dropna().astype(float).tolist()
+        elif "J" in df.columns:
+            vals = df["J"].dropna().astype(float).tolist()
+        else:
+            raise ValueError(
+                f"Could not find per-reaction Jaccard column in jaccard_df for model={model}. "
+                f"Columns: {list(df.columns)}"
+            )
+        jaccard_distributions[model] = vals
+
+    zero_overlaps_map = {info[0]: info[2] for info in jaccard_info}
+
+    jaccard_stacked_plot_path = os.path.join(analysis_dir, "jaccard_index_comparison_stacked.png")
+
+    plot_jaccard_index_comparison_stacked(
+        jaccard_distributions=jaccard_distributions,
+        zero_overlaps=zero_overlaps_map,
+        model_names=model_names,          # keeps your ordering/mapping logic consistent
+        output_path=jaccard_stacked_plot_path,
+        show=show_plots,
+        n_total=n_total_list
+    )
+    logger.info("Saved stacked Jaccard comparison plot: %s", jaccard_stacked_plot_path)
+
+
     # Use first model's Jaccard ranking to select top reactions
     ref_label, _, _, ref_jaccard_df = jaccard_info[0]
     top_rxn_ids = ref_jaccard_df.sort_values("jaccard", ascending=False).head(top_jaccard_reactions)["rxn_id"].tolist()
@@ -308,7 +342,7 @@ def run_fluxomics_analysis(
 
     rxn_ids=["EX_ac_e", "PPC", "MALS"]
     zoom_plot_path = os.path.join(analysis_dir, f"fva_mfa_comparison_zoom_{rxn_ids[0]}_{rxn_ids[1]}_{rxn_ids[2]}.png")
-    plot_fva_mfa_comparison_zoom_with_jaccard_table(
+    plot_fva_mfa_comparison_zoom(
         models_data=comparison_dfs,  # IMPORTANT: use full comparison_dfs (has MFA columns)
         rxn_ids=rxn_ids,
         output_path=zoom_plot_path,

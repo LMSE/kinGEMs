@@ -107,18 +107,19 @@ def run_optimization(
     verbose=False,
     medium=None,
     medium_upper_bound=True,
+    edit_ngam=False,
+    ngam_rxn_id='ATPM',
 ):
+
     """
     Enzyme-constrained FBA via Pyomo, handling:
       - single enzymes (max kcat)
       - enzyme complexes (avg kcat)
       - isoenzymes (OR-GPR)
       - promiscuous enzymes
-    Returns: sol_val, df_FBA, gene_sequences_dict, model
+    Returns: sol_val, df_FBA, gene_sequences_dict, model, (optionally: ngam_growth_rate)
     """
-    # Set random seeds for reproducibility
-    random.seed(42)
-    np.random.seed(42)
+    # Random seeds removed - they prevent simulated annealing exploration
 
     # 1) Load COBRA model
     # print("Step 1: Loading COBRA model...")
@@ -147,6 +148,26 @@ def run_optimization(
             except KeyError:
                 print(f"  Warning: Reaction provided '{rxn_id}' was not found in model")
 
+    # Optionally edit NGAM (ATPM) lower bound and re-optimize
+    ngam_growth_rate = None
+    if edit_ngam:
+        try:
+            atpm_rxn = mod.reactions.get_by_id(ngam_rxn_id)
+            old_lb = atpm_rxn.lower_bound
+            atpm_rxn.lower_bound = 0.0
+            print(f"[NGAM] Set {ngam_rxn_id} lower bound from {old_lb} to 0.0 for NGAM test.")
+            # Re-optimize with ATPM at 0
+            cobra_sol_ngam = mod.optimize()
+            if cobra_sol_ngam is not None:
+                ngam_growth_rate = cobra_sol_ngam.objective_value
+                print(f"[NGAM] Growth rate with {ngam_rxn_id} lower bound 0: {ngam_growth_rate:.6f}")
+            else:
+                print(f"[NGAM] Optimization failed after setting {ngam_rxn_id} lower bound to 0.")
+            # Restore original lower bound
+            atpm_rxn.lower_bound = old_lb
+        except Exception as e:
+            print(f"[NGAM] Error editing {ngam_rxn_id} lower bound: {e}")
+
     # 2) Initial flux guess
     if objective_coeffs is None:
         mod.objective = objective_reaction
@@ -164,6 +185,8 @@ def run_optimization(
     cobra_sol = mod.optimize()
     if cobra_sol is None:
         print(f"  ERROR: Optimization returned None! Model status may be infeasible or unbounded")
+        if edit_ngam:
+            return None, None, None, None #, ngam_growth_rate
         return None
     flux0 = cobra_sol.fluxes.to_dict()
 
@@ -597,6 +620,8 @@ def run_optimization(
         # print(f"Objective value: {sol_val:.6f}")
         # print("=== END DIAGNOSTIC ===\n")
 
+    if edit_ngam:
+        return sol_val, df_FBA, gene_sequences_dict, m #, ngam_growth_rate
     return sol_val, df_FBA, gene_sequences_dict, m
 
 def create_descriptive_filename(objective_reaction, enzyme_upper_bound, maximization,
@@ -670,7 +695,7 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction, obj
                     multi_enzyme_off=False, isoenzymes_off=False,
                     promiscuous_off=False, complexes_off=False,
                     output_dir=None, save_results=True, print_reaction_conditions=True, verbose=True,
-                    solver_name='glpk', medium=None, medium_upper_bound=False):
+                    solver_name='glpk', medium=None, medium_upper_bound=False, edit_ngam=False, ngam_rxn_id='ATPM'):
     """
     Run enzyme-constrained flux balance analysis using a processed dataframe.
 
@@ -718,9 +743,6 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction, obj
     tuple
         (solution_value, df_FBA, gene_sequences_dict, output_filepath)
     """
-    # Set random seeds for reproducibility
-    random.seed(42)
-    np.random.seed(42)
 
     # Check if required columns exist in processed_df
     required_cols = ['Reactions', 'Single_gene', 'SEQ', 'kcat_mean']
@@ -743,15 +765,24 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction, obj
 
     if verbose:
         # Show some example values to verify which column is being used
-        sample_data = processed_df[processed_df[kcat_col].notna()].head(3)
-        if 'kcat_updated' in processed_df.columns:
-            print("  [KCAT DEBUG] Sample kcat_mean vs kcat_updated values:")
-            for idx, row in sample_data.iterrows():
-                rxn, gene = row['Reactions'], row['Single_gene']
-                kcat_mean = row.get('kcat_mean', 'N/A')
-                kcat_updated = row.get('kcat_updated', 'N/A')
-                print(f"    {rxn}_{gene}: kcat_mean={kcat_mean:.3e}, kcat_updated={kcat_updated:.3e}")
+        if 'kcat_updated' in processed_df.columns and 'kcat_mean' in processed_df.columns:
+            diff_rows = processed_df[
+                processed_df['kcat_mean'].notna() &
+                processed_df['kcat_updated'].notna() &
+                (processed_df['kcat_mean'] != processed_df['kcat_updated'])
+            ]
+            sample_data = diff_rows.sample(n=3)
+            print("  [KCAT DEBUG] Sample rows where kcat_mean != kcat_updated:")
+            if sample_data.empty:
+                print("    (No rows where kcat_mean and kcat_updated differ)")
+            else:
+                for idx, row in sample_data.iterrows():
+                    rxn, gene = row['Reactions'], row['Single_gene']
+                    kcat_mean = row.get('kcat_mean', 'N/A')
+                    kcat_updated = row.get('kcat_updated', 'N/A')
+                    print(f"    {rxn}_{gene}: kcat_mean={kcat_mean:.3e}, kcat_updated={kcat_updated:.3e}")
         else:
+            sample_data = processed_df[processed_df[kcat_col].notna()].head(3)
             print(f"  [KCAT DEBUG] Sample {kcat_col} values:")
             for idx, row in sample_data.iterrows():
                 rxn, gene = row['Reactions'], row['Single_gene']
@@ -824,7 +855,9 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction, obj
         tee=verbose,
         solver_name=solver_name,
         medium=medium,
-        medium_upper_bound=medium_upper_bound
+        medium_upper_bound=medium_upper_bound,
+        edit_ngam=edit_ngam,
+        ngam_rxn_id=ngam_rxn_id
     )
 
     # Create descriptive filename and save results if requested

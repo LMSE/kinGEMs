@@ -51,7 +51,9 @@ def simulated_annealing(
     n_top_enzymes=65,
     verbose=False,
     medium=None,
-    medium_upper_bound=False
+    medium_upper_bound=False,
+    edit_ngam=False,
+    ngam_rxn_id='ATPM'
 ):
     """
     Use simulated annealing to tune kcat values for improved biomass production.
@@ -109,17 +111,18 @@ def simulated_annealing(
             return 1.0
         return math.exp((new_biomass - old_biomass) / temperature)
 
-    def get_neighbor(kcat_value, std):
+    def get_neighbor(kcat_value, original_kcat_value, std):
         # Handle NaN kcat values - skip perturbation
         if pd.isna(kcat_value) or kcat_value <= 0:
             return kcat_value  # Return unchanged for invalid values
 
-        k_val_hr = kcat_value * 3600
+        k_val_hr = kcat_value * 3600  # Current kcat in hr^-1
+        k_orig_hr = original_kcat_value * 3600  # Original kcat in hr^-1 (for bounds)
         std_hr = std * 3600 if not pd.isna(std) else 0
 
         # If no standard deviation, use a more aggressive default for exploration
         if std_hr == 0 or pd.isna(std_hr):
-            std_hr = k_val_hr * 0.2  # 20% of original value (more aggressive)
+            std_hr = k_orig_hr * 0.2  # 20% of original value (more aggressive)
 
         # Generate larger perturbations for meaningful improvements
         # Use 85% positive bias: 85% chance of increase, 15% chance of decrease
@@ -131,13 +134,12 @@ def simulated_annealing(
             perturbation = abs(random.gauss(0, std_hr))  # std, negative
             new_kcat = k_val_hr - perturbation  # Decrease
 
-        # Set bounds for perturbations - allow larger changes
-        # Allow increases up to 100% above original
-        ub = 10*std_hr # 1 order of magnitude higher! #k_val_hr * 2.0  # Double the original kcat
-        ub = min(ub, 4.6e9)  # Biological maximum
+        # Set bounds for perturbations relative to ORIGINAL kcat
+        # Allow up to 10x original for exploration
+        ub = min(k_orig_hr * 10.0, 4.6e9)  # Biological maximum
 
-        # Set lower bound to prevent going too low (10% of original minimum)
-        lb = k_val_hr - std_hr
+        # Set lower bound to 1% of original (prevent going too low)
+        lb = max(k_orig_hr * 0.01, 1e-6)
 
         # Clamp to bounds
         return max(min(new_kcat, ub), lb)
@@ -204,7 +206,9 @@ def simulated_annealing(
         save_results=False,
         verbose=False,
         medium=medium,
-        medium_upper_bound=medium_upper_bound
+        medium_upper_bound=medium_upper_bound,
+        edit_ngam=edit_ngam,
+        ngam_rxn_id=ngam_rxn_id
     )
 
     # Check if initial optimization failed
@@ -215,26 +219,34 @@ def simulated_annealing(
         # Return empty results rather than continuing with invalid state
         return {}, pd.DataFrame(), processed_data, [0], [0.0], pd.DataFrame()
 
-    # Pick top N enzymes by mass
+    # DIVERSE enzyme selection: Pick exactly ONE reaction per unique gene
+    # This ensures we tune enzymes across different metabolic pathways
     enzyme_df = df_FBA[df_FBA['Variable']=='enzyme'].copy()
     enzyme_df['MW'] = enzyme_df['Index'].map(mw_dict).fillna(0)
     enzyme_df['enzyme_mass'] = enzyme_df['Value'] * enzyme_df['MW'] * 1e-3
-    top_n = enzyme_df.nlargest(n_top_enzymes, 'enzyme_mass')
+
+    # Merge with processed_data to get kcat values
+    enzyme_with_kcat = (
+        enzyme_df[['Index', 'enzyme_mass']]
+        .rename(columns={'Index': 'Single_gene'})
+        .merge(processed_data[['Reactions', 'Single_gene', 'kcat_mean', 'kcat_std']], on='Single_gene')
+    )
+
+    # For each gene, pick the SINGLE reaction with highest enzyme mass
+    # This gives us one target per unique gene = maximum pathway diversity
     top_targets = (
-        top_n[['Index','enzyme_mass']]
-        .rename(columns={'Index':'Single_gene'})
-        .merge(processed_data, on='Single_gene')
-        [['Reactions','Single_gene','enzyme_mass','kcat_mean','kcat_std']]
+        enzyme_with_kcat
+        .sort_values('enzyme_mass', ascending=False)
+        .drop_duplicates(subset=['Single_gene'], keep='first')  # ONE reaction per gene
+        .head(n_top_enzymes)
         .reset_index(drop=True)
     )
 
-    # Check for duplicates BEFORE deduplication
-    duplicates = top_targets.duplicated(subset=['Reactions', 'Single_gene'], keep=False)
-    if duplicates.any():
-        # print(f"[INFO] Found {duplicates.sum()} duplicate reaction-gene pairs in {len(top_targets)} total rows")
-        # print(f"[INFO] Deduplicating to keep only first occurrence of each (Reaction, Gene) pair...")
-        top_targets = top_targets.drop_duplicates(subset=['Reactions', 'Single_gene'], keep='first').reset_index(drop=True)
-        # print(f"[INFO] After deduplication: {len(top_targets)} unique reaction-gene pairs")
+    if verbose:
+        print(f"\n[ENZYME SELECTION] Selected {len(top_targets)} unique genes:")
+        print(f"  Top 5 targets:")
+        for idx, row in top_targets.head(5).iterrows():
+            print(f"    {row['Reactions']:15s} {row['Single_gene']:10s} mass={row['enzyme_mass']:.4f}")
 
     # print(f"\n[ANNEALING DEBUG] Top 5 target enzymes:")
     # print(top_targets.head()[['Reactions', 'Single_gene', 'enzyme_mass', 'kcat_mean']])
@@ -307,8 +319,9 @@ def simulated_annealing(
                 # if iteration <= 3:  # Debug first 3 iterations
                 #     print(f"  [DEBUG] {rxn}_{gene}: {original_k:.3e} → {new_k_s:.3e} s⁻¹ (change: +nan%) [SKIPPED - NaN/invalid]")
             else:
-                # Use original kcat for neighbor calculation (preserves proper exploration)
-                new_k_hr = get_neighbor(original_k, stds[i])  # returns hr⁻¹
+                # Perturb from CURRENT kcat (incremental optimization)
+                # But keep bounds relative to ORIGINAL kcat (valid biological range)
+                new_k_hr = get_neighbor(current_k, original_k, stds[i])  # returns hr⁻¹
                 new_k_s = new_k_hr / 3600
 
                 # Check if actually different
@@ -316,7 +329,7 @@ def simulated_annealing(
                     actually_changed += 1
 
                 # if iteration <= 3:  # Debug first 3 iterations
-                #     print(f"  [DEBUG] {rxn}_{gene}: {original_k:.3e} → {new_k_s:.3e} s⁻¹ (change: {(new_k_s-original_k)/original_k*100:+.1f}%)")
+                #     print(f"  [DEBUG] {rxn}_{gene}: {current_k:.3e} → {new_k_s:.3e} s⁻¹ (change: {(new_k_s-current_k)/current_k*100:+.1f}%)")
 
             # update_kcat expects hr⁻¹ and will convert to s⁻¹ internally
             updated_df = update_kcat(updated_df, rxn, gene, new_k_hr)
@@ -340,9 +353,11 @@ def simulated_annealing(
             enzyme_upper_bound=enzyme_fraction,
             output_dir=None,
             save_results=False,
-            verbose=True if iteration <= 3 else False,  # Enable verbose for first 3 iterations to debug
+            verbose=False,
             medium=medium,
-            medium_upper_bound=medium_upper_bound
+            medium_upper_bound=medium_upper_bound,
+            edit_ngam=edit_ngam,
+            ngam_rxn_id=ngam_rxn_id
         )
 
         # Handle optimization failures
