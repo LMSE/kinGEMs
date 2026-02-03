@@ -64,7 +64,7 @@ from kinGEMs.plots import (
     plot_cumulative_fvi_distribution,
 )
 from kinGEMs.modeling.optimize import run_optimization_with_dataframe
-from kinGEMs.modeling.tuning import simulated_annealing
+from kinGEMs.modeling.tuning import simulated_annealing, sweep_maintenance_parameters
 
 # Suppress warnings and configure logging
 warnings.filterwarnings('ignore')
@@ -713,6 +713,7 @@ def main():
     enzyme_upper_bound = config.get('enzyme_upper_bound', 0.15)
     enable_fva = config.get('enable_fva', False)
     enable_biolog = config.get('enable_biolog_validation', False)
+    enable_maintenance_sweep = config.get('enable_maintenance_sweep', False)
     solver_name = config.get('solver', 'glpk')  # Default to GLPK (free solver)
     edit_ngam = config.get('edit_ngam', False)
     ngam_rxn_id = config.get('ngam_rxn_id', 'ATPM')
@@ -764,6 +765,7 @@ def main():
     print(f"Enzyme upper bound: {enzyme_upper_bound}")
     print(f"Enable FVA: {enable_fva}")
     print(f"Enable Biolog validation: {enable_biolog}")
+    print(f"Enable maintenance sweep: {enable_maintenance_sweep}")
 
     # Print FVA config if enabled
     if enable_fva:
@@ -1075,6 +1077,112 @@ def main():
     print(f"\n  Saved merged DataFrame to: {final_info_path}")
 
     # === Step 6: Optional analyses ===
+    # Track optimal maintenance parameters if sweep is run
+    optimal_ngam = None
+    optimal_gam = None
+
+    if enable_maintenance_sweep:
+        print("\n=== Step 6a: Maintenance Parameters Sweep ===")
+        maintenance_config = config.get('maintenance_sweep', {})
+        ngam_range = maintenance_config.get('ngam_range', None)
+        gam_range = maintenance_config.get('gam_range', None)
+
+        print(f"  Configuration:")
+        print(f"    - NGAM range: {ngam_range if ngam_range else 'default'}")
+        print(f"    - GAM range: {gam_range if gam_range else 'constant'}")
+        print(f"    - NGAM reaction: {ngam_rxn_id}")
+
+        maintenance_results = sweep_maintenance_parameters(
+            model=model,
+            processed_data=df_new,  # Use tuned parameters
+            biomass_reaction=biomass_reaction,
+            ngam_rxn_id=ngam_rxn_id,
+            ngam_range=ngam_range,
+            gam_range=gam_range,
+            enzyme_upper_bound=enzyme_upper_bound,
+            output_dir=tuning_results_dir,
+            medium=medium,
+            medium_upper_bound=medium_upper_bound,
+            verbose=maintenance_config.get('verbose', False)
+        )
+        print(f"  Maintenance sweep completed: {len(maintenance_results)} parameter combinations tested")
+
+        # Get optimal parameters from sweep
+        if len(maintenance_results) > 0 and maintenance_results['biomass'].max() > 0:
+            best_idx = maintenance_results['biomass'].idxmax()
+            optimal_ngam = maintenance_results.loc[best_idx, 'ngam']
+            optimal_gam = maintenance_results.loc[best_idx, 'gam']
+            optimal_biomass = maintenance_results.loc[best_idx, 'biomass']
+
+            print(f"\n  Optimal maintenance parameters found:")
+            print(f"    - NGAM: {optimal_ngam:.2f} mmol/gDW/h")
+            print(f"    - GAM: {optimal_gam:.2f} mmol ATP/gDW")
+            print(f"    - Biomass: {optimal_biomass:.4f}")
+            print(f"  These parameters will be applied to the final model")
+
+            # Run FVA with optimal maintenance parameters if FVA is enabled
+            if enable_fva:
+                print(f"\n  Running FVA with optimal maintenance parameters...")
+                from copy import deepcopy
+                model_optimal = deepcopy(model)
+
+                # Apply optimal NGAM
+                try:
+                    ngam_rxn = model_optimal.reactions.get_by_id(ngam_rxn_id)
+                    ngam_rxn.lower_bound = optimal_ngam
+                except KeyError:
+                    print(f"    Warning: NGAM reaction '{ngam_rxn_id}' not found")
+
+                # Apply optimal GAM
+                try:
+                    biomass_rxn = model_optimal.reactions.get_by_id(biomass_reaction)
+                    atp_met_ids = ['atp_c', 'ATP_c', 'cpd00002_c0']
+
+                    current_gam = None
+                    atp_met = None
+                    for met_id in atp_met_ids:
+                        try:
+                            met = model_optimal.metabolites.get_by_id(met_id)
+                            if met in biomass_rxn.metabolites:
+                                current_gam = abs(biomass_rxn.metabolites[met])
+                                atp_met = met
+                                break
+                        except KeyError:
+                            continue
+
+                    if current_gam and atp_met:
+                        scale = optimal_gam / current_gam
+                        current_mets = biomass_rxn.metabolites.copy()
+
+                        met_mappings = {
+                            'h2o': ['h2o_c', 'H2O_c', 'cpd00001_c0'],
+                            'adp': ['adp_c', 'ADP_c', 'cpd00008_c0'],
+                            'pi': ['pi_c', 'Pi_c', 'cpd00009_c0'],
+                            'h': ['h_c', 'H_c', 'cpd00067_c0']
+                        }
+
+                        mets_to_scale = [atp_met]
+                        for met_type, possible_ids in met_mappings.items():
+                            for met_id in possible_ids:
+                                try:
+                                    met = model_optimal.metabolites.get_by_id(met_id)
+                                    if met in current_mets:
+                                        mets_to_scale.append(met)
+                                        break
+                                except KeyError:
+                                    continue
+
+                        for met in mets_to_scale:
+                            old_coef = current_mets[met]
+                            biomass_rxn.add_metabolites({met: old_coef * (scale - 1.0)}, combine=True)
+                except KeyError:
+                    print(f"    Warning: Biomass reaction '{biomass_reaction}' not found")
+
+                # Run FVA with optimal parameters
+                fva_config = config.get('fva', {})
+                run_fva_analysis(model_optimal, df_new, biomass_reaction, enzyme_upper_bound,
+                               tuning_results_dir, f"{model_name}_optimal_maintenance", fva_config, og_model=og_model)
+
     if enable_fva:
         fva_config = config.get('fva', {})
         run_fva_analysis(model, df_new, biomass_reaction, enzyme_upper_bound,
@@ -1090,6 +1198,70 @@ def main():
 
     # === Step 7: Save Final Model ===
     print("\n=== Step 7: Saving final model ===")
+
+    # Apply optimal maintenance parameters if found from sweep
+    if optimal_ngam is not None and optimal_gam is not None:
+        print(f"  Applying optimal maintenance parameters:")
+        print(f"    - Setting NGAM ({ngam_rxn_id}) lower bound to {optimal_ngam:.2f}")
+        try:
+            ngam_rxn = model.reactions.get_by_id(ngam_rxn_id)
+            ngam_rxn.lower_bound = optimal_ngam
+        except KeyError:
+            print(f"    Warning: NGAM reaction '{ngam_rxn_id}' not found")
+
+        # Apply GAM scaling
+        print(f"    - Scaling GAM to {optimal_gam:.2f} mmol ATP/gDW")
+        try:
+            biomass_rxn = model.reactions.get_by_id(biomass_reaction)
+            atp_met_ids = ['atp_c', 'ATP_c', 'cpd00002_c0']
+
+            # Find ATP and get current GAM
+            current_gam = None
+            atp_met = None
+            for met_id in atp_met_ids:
+                try:
+                    met = model.metabolites.get_by_id(met_id)
+                    if met in biomass_rxn.metabolites:
+                        current_gam = abs(biomass_rxn.metabolites[met])
+                        atp_met = met
+                        break
+                except KeyError:
+                    continue
+
+            if current_gam and atp_met:
+                scale = optimal_gam / current_gam
+                current_mets = biomass_rxn.metabolites.copy()
+
+                # Scale ATP maintenance block (ATP, H2O, ADP, Pi, H+)
+                met_mappings = {
+                    'h2o': ['h2o_c', 'H2O_c', 'cpd00001_c0'],
+                    'adp': ['adp_c', 'ADP_c', 'cpd00008_c0'],
+                    'pi': ['pi_c', 'Pi_c', 'cpd00009_c0'],
+                    'h': ['h_c', 'H_c', 'cpd00067_c0']
+                }
+
+                mets_to_scale = [atp_met]
+                for met_type, possible_ids in met_mappings.items():
+                    for met_id in possible_ids:
+                        try:
+                            met = model.metabolites.get_by_id(met_id)
+                            if met in current_mets:
+                                mets_to_scale.append(met)
+                                break
+                        except KeyError:
+                            continue
+
+                for met in mets_to_scale:
+                    old_coef = current_mets[met]
+                    biomass_rxn.add_metabolites({met: old_coef * (scale - 1.0)}, combine=True)
+
+                print(f"    ✓ GAM scaled from {current_gam:.2f} to {optimal_gam:.2f}")
+            else:
+                print(f"    Warning: Could not find ATP in biomass reaction for GAM scaling")
+
+        except KeyError:
+            print(f"    Warning: Biomass reaction '{biomass_reaction}' not found")
+
     model_output_dir = os.path.join(project_root, "models")
     os.makedirs(model_output_dir, exist_ok=True)
     model_output_path = os.path.join(model_output_dir, f"{run_id}.xml")
@@ -1098,6 +1270,26 @@ def main():
     model_with_kcats = clean_annotations(model_with_kcats)
     write_sbml_model(model_with_kcats, model_output_path)
     print(f"  Final GEM saved to: {model_output_path}")
+
+    # Save model configuration summary
+    config_summary = {
+        'run_id': run_id,
+        'model_name': model_name,
+        'organism': organism,
+        'enzyme_upper_bound': enzyme_upper_bound,
+        'initial_biomass': biomasses[0] if biomasses else None,
+        'final_biomass': biomasses[-1] if biomasses else None,
+        'improvement_percent': improvement,
+        'iterations': len(iterations) if iterations else 0,
+        'optimal_ngam': optimal_ngam,
+        'optimal_gam': optimal_gam,
+        'ngam_rxn_id': ngam_rxn_id,
+        'biomass_reaction': biomass_reaction
+    }
+    config_summary_path = os.path.join(tuning_results_dir, "model_config_summary.json")
+    with open(config_summary_path, 'w') as f:
+        json.dump(config_summary, f, indent=2)
+    print(f"  Configuration summary saved to: {config_summary_path}")
 
     # === Summary ===
     print("\n" + "="*70)
@@ -1109,6 +1301,10 @@ def main():
     print(f"Final biomass: {biomasses[-1]:.4f}")
     print(f"Improvement: {improvement:.1f}%")
     print(f"Iterations: {len(iterations)}")
+    if optimal_ngam is not None:
+        print(f"\nOptimal maintenance parameters:")
+        print(f"  NGAM: {optimal_ngam:.2f} mmol/gDW/h")
+        print(f"  GAM: {optimal_gam:.2f} mmol ATP/gDW")
     print(f"\nResults directory: {tuning_results_dir}")
     print(f"Final model: {model_output_path}")
     print("="*70)

@@ -155,16 +155,16 @@ def run_optimization(
             atpm_rxn = mod.reactions.get_by_id(ngam_rxn_id)
             old_lb = atpm_rxn.lower_bound
             atpm_rxn.lower_bound = 0.0
-            print(f"[NGAM] Set {ngam_rxn_id} lower bound from {old_lb} to 0.0 for NGAM test.")
+            # print(f"[NGAM] Set {ngam_rxn_id} lower bound from {old_lb} to 0.0 for NGAM test.")
             # Re-optimize with ATPM at 0
             cobra_sol_ngam = mod.optimize()
             if cobra_sol_ngam is not None:
                 ngam_growth_rate = cobra_sol_ngam.objective_value
-                print(f"[NGAM] Growth rate with {ngam_rxn_id} lower bound 0: {ngam_growth_rate:.6f}")
-            else:
-                print(f"[NGAM] Optimization failed after setting {ngam_rxn_id} lower bound to 0.")
+                # print(f"[NGAM] Growth rate with {ngam_rxn_id} lower bound 0: {ngam_growth_rate:.6f}")
+            # else:
+                # print(f"[NGAM] Optimization failed after setting {ngam_rxn_id} lower bound to 0.")
             # Restore original lower bound
-            atpm_rxn.lower_bound = old_lb
+            # atpm_rxn.lower_bound = old_lb
         except Exception as e:
             print(f"[NGAM] Error editing {ngam_rxn_id} lower bound: {e}")
 

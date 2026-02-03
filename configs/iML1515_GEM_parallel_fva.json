@@ -6,10 +6,12 @@
   "solver": "glpk",
   "enable_fva": false,
   "enable_biolog_validation": false,
+  "enable_maintenance_sweep": true,
   "edit_ngam": false,
   "ngam_rxn_id": "ATPM",
   "_comment_edit_ngam": "Set to true to set NGAM (ATPM) lower bound to 0 during optimization",
   "_comment_ngam_rxn_id": "Reaction ID for NGAM/ATPM (default: 'ATPM')",
+  "_comment_enable_maintenance_sweep": "Set to true to run NGAM/GAM parameter sweep",
 
   "fva": {
     "parallel": true,
@@ -31,14 +33,22 @@
     "max_iterations": 1000,
     "max_unchanged_iterations": 50,
     "change_threshold": 0.001,
-    "biomass_goal": 0.2,
-    "n_top_enzymes": 20,
+    "biomass_goal": 0.87,
+    "n_top_enzymes": 500,
     "verbose": false,
     "_comment_aggressive": "AGGRESSIVE SETTINGS - larger perturbations and longer search",
     "_comment_temperature": "High starting temp (100) for large initial exploration",
     "_comment_cooling_rate": "Moderate cooling (0.95) for thorough exploration",
     "_comment_change_threshold": "Standard threshold (0.1%) for meaningful improvements",
     "_comment_biomass_goal": "Target goal of 0.2 biomass",
-    "_comment_n_top_enzymes": "Fewer enzymes (20) to focus on most impactful bottlenecks"
+    "_comment_n_top_enzymes": "Tune top 500 enzymes for sufficient optimization flexibility"
+  },
+
+  "maintenance_sweep": {
+    "ngam_range": [0, 1, 2, 3.15, 5, 7, 10, 15, 20],
+    "gam_range": [20,30, 40, 50, 60, 70, 80, 90],
+    "verbose": false,
+    "_comment_ngam_range": "NGAM values to test (ATPM lower bound in mmol/gDW/h). ~6 is default for E. coli",
+    "_comment_gam_range": "GAM values to test (ATP in biomass, mmol/gDW). null = keep original constant"
   }
 }
