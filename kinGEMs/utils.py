@@ -318,16 +318,85 @@ def run_all_constraints_fva(model, processed_df, biomass_reaction, enzyme_upper_
 
 
 def run_tuned_fva(model, tuned_df, biomass_reaction, enzyme_upper_bound,
-                 use_parallel=False, n_workers=None, method='dask', chunk_size=None, constrain_biomass=True):
-    """Level 5: Post-tuned kinGEMs (complete constraints with optimized kcat values)."""
-    print("\n=== Level 5: Post-Tuned (Simulated Annealing) ===")
+                 use_parallel=False, n_workers=None, method='dask', chunk_size=None, constrain_biomass=True,
+                 optimal_ngam=None, optimal_gam=None):
+    """Level 5: Post-tuned kinGEMs (complete constraints with optimized kcat values and maintenance parameters)."""
+    from copy import deepcopy
+    
+    print("\n=== Level 5: Post-Tuned (Simulated Annealing + Maintenance Optimization) ===")
     print("  (multi_enzyme_off=False, isoenzymes_off=False, promiscuous_off=False, complexes_off=False)")
     print("  Complete kinGEMs with tuned kcat values from simulated annealing")
+    
+    # Apply optimal maintenance parameters if provided
+    fva_model = deepcopy(model)
+    if optimal_ngam is not None and optimal_gam is not None:
+        print(f"  Applying optimal maintenance parameters:")
+        print(f"    - NGAM: {optimal_ngam:.2f} mmol/gDW/h")
+        print(f"    - GAM: {optimal_gam:.2f} mmol ATP/gDW")
+        
+        # Apply NGAM
+        try:
+            ngam_rxn_id = 'ATPM'  # Default E. coli NGAM reaction
+            ngam_rxn = fva_model.reactions.get_by_id(ngam_rxn_id)
+            ngam_rxn.lower_bound = float(optimal_ngam)
+        except KeyError:
+            print(f"    Warning: NGAM reaction '{ngam_rxn_id}' not found")
+        
+        # Apply GAM (if > 0 to avoid invalid reactions)
+        if optimal_gam > 0:
+            try:
+                biomass_rxn = fva_model.reactions.get_by_id(biomass_reaction)
+                atp_met_ids = ['atp_c', 'ATP_c', 'cpd00002_c0']
+                
+                # Find ATP and get current GAM
+                current_gam = None
+                atp_met = None
+                for met_id in atp_met_ids:
+                    try:
+                        met = fva_model.metabolites.get_by_id(met_id)
+                        if met in biomass_rxn.metabolites:
+                            current_gam = abs(biomass_rxn.metabolites[met])
+                            atp_met = met
+                            break
+                    except KeyError:
+                        continue
+                
+                if current_gam and atp_met and current_gam > 0:
+                    scale = optimal_gam / current_gam
+                    current_mets = biomass_rxn.metabolites.copy()
+                    
+                    # Scale ATP maintenance block
+                    met_mappings = {
+                        'h2o': ['h2o_c', 'H2O_c', 'cpd00001_c0'],
+                        'adp': ['adp_c', 'ADP_c', 'cpd00008_c0'],
+                        'pi': ['pi_c', 'Pi_c', 'cpd00009_c0'],
+                        'h': ['h_c', 'H_c', 'cpd00067_c0']
+                    }
+                    
+                    mets_to_scale = [atp_met]
+                    for met_type, possible_ids in met_mappings.items():
+                        for met_id in possible_ids:
+                            try:
+                                met = fva_model.metabolites.get_by_id(met_id)
+                                if met in current_mets:
+                                    mets_to_scale.append(met)
+                                    break
+                            except KeyError:
+                                continue
+                    
+                    for met in mets_to_scale:
+                        old_coef = current_mets[met]
+                        biomass_rxn.add_metabolites({met: old_coef * (scale - 1.0)}, combine=True)
+                    
+                    print(f"    ✓ GAM scaled from {current_gam:.2f} to {optimal_gam:.2f}")
+                
+            except KeyError:
+                print(f"    Warning: Biomass reaction '{biomass_reaction}' not found")
 
     if use_parallel:
-        print(f"  Starting parallel FVA with {len(model.reactions)} reactions...")
+        print(f"  Starting parallel FVA with {len(fva_model.reactions)} reactions...")
         fva_df, processed_df_result, df_FBA = flux_variability_analysis_parallel(
-            model=model,
+            model=fva_model,
             processed_df=tuned_df,
             biomass_reaction=biomass_reaction,
             output_file=None,
@@ -344,7 +413,7 @@ def run_tuned_fva(model, tuned_df, biomass_reaction, enzyme_upper_bound,
         biomass = fva_df['Solution Biomass'].iloc[0]
     else:
         fva_df, processed_df_result, df_FBA = flux_variability_analysis(
-            model=model,
+            model=fva_model,
             processed_df=tuned_df,
             biomass_reaction=biomass_reaction,
             enzyme_upper_bound=enzyme_upper_bound,

@@ -128,7 +128,7 @@ def simulated_annealing(
         # Use 70% positive bias: 70% chance of increase, 30% chance of decrease
         if random.random() < 0.70:  # 70% chance of positive perturbation
             # Moderate increases for gradual improvement
-            perturbation = abs(random.gauss(0, 3*std_hr))  # 3x std for exploration
+            perturbation = abs(random.gauss(0, std_hr * 20))  # 3x std for more controlled changes
             new_kcat = k_val_hr + perturbation  # Increase
         else:  # 30% chance of decrease
             perturbation = abs(random.gauss(0, std_hr))  # 1x std
@@ -136,7 +136,7 @@ def simulated_annealing(
 
         # Set bounds for perturbations relative to ORIGINAL kcat
         # Allow up to 10x original for exploration
-        ub = min(k_orig_hr * 10.0, 4.6e9)  # Biological maximum
+        ub = min(k_orig_hr * 100.0, 4.6e9)  # Biological maximum
 
         # Set lower bound to 1% of original (prevent going too low)
         lb = max(k_orig_hr * 0.01, 1e-6)
@@ -360,7 +360,7 @@ def simulated_annealing(
         if new_biomass is None or new_biomass <= 0:
             if verbose or iteration <= 5:
                 print(f"  [DEBUG] Iter {iteration}: Optimization failed (biomass={new_biomass})")
-                print(f"    - Perturbed {n_to_perturb} enzymes with increases ranging 0-2%")
+                print(f"    - Perturbed {n_to_perturb} enzymes but constraints may be too tight or kcats too exploratory")
                 print("    - This suggests even small increases overwhelm constraints")
             # Skip this iteration - don't accept failed optimizations
             # Keep using the current biomass instead of setting to 0.0
@@ -478,6 +478,7 @@ def sweep_maintenance_parameters(
     output_dir=None,
     medium=None,
     medium_upper_bound=False,
+    biomass_goal=None,
     verbose=False
 ):
     """
@@ -511,6 +512,9 @@ def sweep_maintenance_parameters(
         Growth medium composition
     medium_upper_bound : bool or float, optional
         Upper bound for medium exchanges (default: False)
+    biomass_goal : float, optional
+        Target biomass value. If specified, sweep stops early when this goal is reached
+        (default: None, tests all combinations)
     verbose : bool, optional
         Print detailed progress (default: False)
 
@@ -521,17 +525,17 @@ def sweep_maintenance_parameters(
     """
     import numpy as np
     from copy import deepcopy
-    
+
     # Default ranges
     if ngam_range is None:
         ngam_range = [0, 1, 2, 3.15, 5, 7, 10, 15, 20]  # 3.15 is typical E. coli value
-    
+
     # Get original GAM value from biomass reaction
     biomass_rxn = model.reactions.get_by_id(biomass_reaction)
     original_gam = None
     atp_met_ids = ['atp_c', 'ATP_c', 'cpd00002_c0']  # Common ATP IDs
     atp_met = None
-    
+
     for met_id in atp_met_ids:
         try:
             met = model.metabolites.get_by_id(met_id)
@@ -544,10 +548,10 @@ def sweep_maintenance_parameters(
                 break
         except KeyError:
             continue
-    
+
     if original_gam is None and verbose:
         print("  Warning: Could not find ATP in biomass reaction - GAM adjustment disabled")
-    
+
     # Identify related metabolites in ATP maintenance block
     # GAM reaction: ATP + H2O -> ADP + Pi + H
     maintenance_mets = {}
@@ -559,7 +563,7 @@ def sweep_maintenance_parameters(
             'pi': ['pi_c', 'Pi_c', 'cpd00009_c0'],
             'h': ['h_c', 'H_c', 'cpd00067_c0']
         }
-        
+
         for met_type, possible_ids in met_mappings.items():
             for met_id in possible_ids:
                 try:
@@ -571,11 +575,11 @@ def sweep_maintenance_parameters(
                         break
                 except KeyError:
                     continue
-    
+
     # If no GAM range specified, use original value
     if gam_range is None:
         gam_range = [original_gam] if original_gam is not None else [None]
-    
+
     # Store original NGAM value
     try:
         ngam_rxn = model.reactions.get_by_id(ngam_rxn_id)
@@ -585,35 +589,35 @@ def sweep_maintenance_parameters(
     except KeyError:
         print(f"  Warning: NGAM reaction '{ngam_rxn_id}' not found in model")
         return pd.DataFrame()
-    
+
     results = []
     total_combinations = len(ngam_range) * len(gam_range)
     current = 0
-    
+
     print(f"\n  Testing {len(ngam_range)} NGAM values × {len(gam_range)} GAM values = {total_combinations} combinations")
-    
+
     for ngam_val in ngam_range:
         for gam_val in gam_range:
             current += 1
-            
+
             # Create a copy of the model
             test_model = deepcopy(model)
-            
+
             # Set NGAM
             test_ngam_rxn = test_model.reactions.get_by_id(ngam_rxn_id)
             test_ngam_rxn.lower_bound = ngam_val
-            
+
             # Set GAM if specified
             if gam_val is not None and original_gam is not None and atp_met is not None:
                 test_biomass = test_model.reactions.get_by_id(biomass_reaction)
-                
+
                 # Scale the entire ATP maintenance block proportionally
                 # GAM reaction: ATP + H2O -> ADP + Pi + H
                 scale = gam_val / original_gam
-                
+
                 # Get current coefficients
                 current_mets = test_biomass.metabolites.copy()
-                
+
                 # Find ATP metabolite in the test model
                 test_atp_met = None
                 for met_id in atp_met_ids:
@@ -623,11 +627,11 @@ def sweep_maintenance_parameters(
                             break
                     except KeyError:
                         continue
-                
+
                 if test_atp_met is not None:
                     # Scale ATP and related maintenance metabolites
                     mets_to_scale = [test_atp_met]
-                    
+
                     # Add related metabolites if they exist
                     for met_type, met in maintenance_mets.items():
                         try:
@@ -636,13 +640,13 @@ def sweep_maintenance_parameters(
                                 mets_to_scale.append(test_met)
                         except KeyError:
                             continue
-                    
+
                     # Scale all metabolites in the ATP maintenance block
                     for met in mets_to_scale:
                         old_coef = current_mets[met]
                         # Add the difference: new_coef - old_coef = old_coef * (scale - 1)
                         test_biomass.add_metabolites({met: old_coef * (scale - 1.0)}, combine=True)
-            
+
             # Run optimization
             try:
                 biomass, _, _, _ = run_optimization_with_dataframe(
@@ -661,46 +665,48 @@ def sweep_maintenance_parameters(
             except Exception as e:
                 biomass = 0.0
                 status = f'error: {str(e)[:50]}'
-            
+
             results.append({
                 'ngam': ngam_val,
                 'gam': gam_val if gam_val is not None else original_gam,
                 'biomass': biomass,
                 'status': status
             })
-            
+
             if verbose or current % 5 == 0:
                 print(f"    [{current}/{total_combinations}] NGAM={ngam_val:.2f}, GAM={gam_val if gam_val else 'orig'}→{biomass:.4f}", end='\r')
-    
+
+        # Continue to next iteration without breaking
+
     print()  # New line after progress
-    
+
     # Create results DataFrame
     results_df = pd.DataFrame(results)
-    
+
     # Save results if output directory specified
     if output_dir:
         ensure_dir_exists(output_dir)
         results_path = os.path.join(output_dir, "maintenance_sweep_results.csv")
         results_df.to_csv(results_path, index=False)
         print(f"  Saved results to: {results_path}")
-        
+
         # Create visualization
         try:
             import matplotlib.pyplot as plt
-            
+
             fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-            
+
             # Plot 1: Biomass vs NGAM (for each GAM value)
             for gam_val in results_df['gam'].unique():
                 subset = results_df[results_df['gam'] == gam_val]
-                axes[0].plot(subset['ngam'], subset['biomass'], 
+                axes[0].plot(subset['ngam'], subset['biomass'],
                            marker='o', label=f'GAM={gam_val:.1f}')
             axes[0].set_xlabel('NGAM (mmol/gDW/h)')
             axes[0].set_ylabel('Biomass (1/h)')
             axes[0].set_title('Biomass vs NGAM')
-            axes[0].legend()
+            axes[0].legend(loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=3, frameon=True)
             axes[0].grid(True, alpha=0.3)
-            
+
             # Plot 2: Heatmap if multiple GAM values tested
             if len(gam_range) > 1:
                 pivot_data = results_df.pivot(index='gam', columns='ngam', values='biomass')
@@ -719,7 +725,7 @@ def sweep_maintenance_parameters(
                 axes[1].set_ylabel('Biomass (1/h)')
                 axes[1].set_title('Biomass Distribution')
                 axes[1].grid(True, alpha=0.3, axis='y')
-            
+
             plt.tight_layout()
             plot_path = os.path.join(output_dir, "maintenance_sweep_plot.png")
             plt.savefig(plot_path, dpi=300, bbox_inches='tight')
@@ -727,13 +733,13 @@ def sweep_maintenance_parameters(
             print(f"  Saved plot to: {plot_path}")
         except Exception as e:
             print(f"  Warning: Could not create plot: {e}")
-    
+
     # Print summary
     print("\n  Summary:")
     print(f"    Total combinations tested: {len(results_df)}")
     print(f"    Feasible solutions: {(results_df['biomass'] > 0).sum()}")
     print(f"    Best biomass: {results_df['biomass'].max():.4f} at NGAM={results_df.loc[results_df['biomass'].idxmax(), 'ngam']:.2f}, GAM={results_df.loc[results_df['biomass'].idxmax(), 'gam']:.2f}")
-    
+
     return results_df
 
 

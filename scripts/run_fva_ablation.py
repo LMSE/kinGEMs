@@ -44,7 +44,7 @@ from kinGEMs.dataset import (
     convert_to_irreversible
 )
 from kinGEMs.modeling.optimize import run_optimization_with_dataframe
-from kinGEMs.modeling.tuning import simulated_annealing
+from kinGEMs.modeling.tuning import simulated_annealing, sweep_maintenance_parameters
 from kinGEMs.plots import create_fva_ablation_dashboard
 from kinGEMs.utils import (
     load_config,
@@ -73,6 +73,8 @@ def main():
     parser.add_argument('--tuned-file', type=str, default=None, help='Path to pre-tuned data file')
     parser.add_argument('--no-biomass-constraint', action='store_true',
                         help='Run FVA without constraining biomass to near-optimal (allows biomass to vary freely)')
+    parser.add_argument('--skip-maintenance-sweep', action='store_true',
+                        help='Skip maintenance parameter sweep for post-tuned model')
     parser.add_argument('--replot', type=str, default=None,
                         help='Path to existing results directory to regenerate figures only (skip FVA)')
 
@@ -298,9 +300,13 @@ def main():
         print("\n=== Level 5: Loading Pre-Tuned Data ===")
         tuned_df = pd.read_csv(args.tuned_file)
         print(f"  Loaded tuned data: {len(tuned_df)} rows")
+        optimal_ngam = None
+        optimal_gam = None
     elif args.skip_tuning:
         print("\n=== Level 5: Skipped (no tuned data provided) ===")
         tuned_df = None
+        optimal_ngam = None
+        optimal_gam = None
     else:
         print("\n=== Level 5: Running Simulated Annealing ===")
         sa_config = config.get('simulated_annealing', {})
@@ -346,10 +352,62 @@ def main():
         del iterations, biomasses  # Iteration data no longer needed for FVA
         gc.collect()  # Force garbage collection
 
+        # ===================================================================
+        # Maintenance Parameter Sweep (to match baseline biomass)
+        # ===================================================================
+        optimal_ngam = None
+        optimal_gam = None
+        
+        if not args.skip_maintenance_sweep:
+            print("\n=== Running Maintenance Parameter Sweep ===")
+            print(f"  Target: Match baseline biomass ({biomass_values['Level 1: Baseline GEM']:.4f})")
+            
+            maintenance_config = config.get('maintenance_sweep', {})
+            ngam_rxn_id = config.get('ngam_rxn_id', 'ATPM')
+            ngam_range = maintenance_config.get('ngam_range', None)
+            gam_range = maintenance_config.get('gam_range', None)
+            
+            maintenance_results = sweep_maintenance_parameters(
+                model=model,
+                processed_data=tuned_df,  # Use tuned parameters
+                biomass_reaction=biomass_reaction,
+                ngam_rxn_id=ngam_rxn_id,
+                ngam_range=ngam_range,
+                gam_range=gam_range,
+                enzyme_upper_bound=enzyme_upper_bound,
+                output_dir=results_dir,
+                medium=None,
+                medium_upper_bound=False,
+                verbose=False
+            )
+            
+            maintenance_results.to_csv(os.path.join(results_dir, 'maintenance_sweep_results.csv'), index=False)
+            print(f"  Sweep complete: {len(maintenance_results)} combinations tested")
+            
+            # Find parameters closest to baseline biomass
+            baseline_biomass = biomass_values['Level 1: Baseline GEM']
+            if len(maintenance_results) > 0 and maintenance_results['biomass'].max() > 0:
+                maintenance_results['distance_to_baseline'] = abs(maintenance_results['biomass'] - baseline_biomass)
+                best_idx = maintenance_results['distance_to_baseline'].idxmin()
+                
+                optimal_ngam = float(maintenance_results.loc[best_idx, 'ngam'])
+                optimal_gam = float(maintenance_results.loc[best_idx, 'gam'])
+                optimal_biomass = float(maintenance_results.loc[best_idx, 'biomass'])
+                
+                print(f"\n  Optimal maintenance parameters (closest to baseline):")
+                print(f"    - NGAM: {optimal_ngam:.2f} mmol/gDW/h")
+                print(f"    - GAM: {optimal_gam:.2f} mmol ATP/gDW")
+                print(f"    - Biomass: {optimal_biomass:.4f}")
+                print(f"    - Baseline: {baseline_biomass:.4f}")
+                print(f"    - Deviation: {abs(optimal_biomass - baseline_biomass):.4f}")
+            else:
+                print("  Warning: No feasible solutions found in maintenance sweep")
+
     if tuned_df is not None:
         fva_df, biomass = run_tuned_fva(
             model, tuned_df, biomass_reaction, enzyme_upper_bound,
-            use_parallel, n_workers, fva_method, chunk_size, constrain_biomass
+            use_parallel, n_workers, fva_method, chunk_size, constrain_biomass,
+            optimal_ngam=optimal_ngam, optimal_gam=optimal_gam
         )
         fva_results['Level 5: Post-Tuned'] = fva_df
         biomass_values['Level 5: Post-Tuned'] = biomass
@@ -385,10 +443,16 @@ def main():
     print("  - level4_all_constraints.csv")
     if tuned_df is not None:
         print("  - level5_post_tuned.csv")
+        if optimal_ngam is not None:
+            print("  - maintenance_sweep_results.csv (NGAM/GAM optimization)")
     print("  - fva_ablation_cumulative.png (enhanced with biomass subplot)")
     print("  - fva_ablation_boxplot.png (distribution analysis)")
     print("  - fva_ablation_biomass_progression.png (biomass vs constraints)")
     print("  - fva_ablation_summary.csv (updated with corrected FVi terminology)")
+    if optimal_ngam is not None:
+        print(f"\nLevel 5 uses optimal maintenance parameters:")
+        print(f"  NGAM: {optimal_ngam:.2f} mmol/gDW/h, GAM: {optimal_gam:.2f} mmol ATP/gDW")
+        print(f"  (Selected to match baseline biomass: {biomass_values['Level 1: Baseline GEM']:.4f})")
     print("="*80)
 
 

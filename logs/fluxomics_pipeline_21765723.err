@@ -6244,3 +6244,4 @@ ImportError: cannot import name 'sweep_maintenance_parameters' from 'kinGEMs.mod
 2026-02-04 18:24:23.714 | INFO     | kinGEMs.config:<module>:12 - PROJ_ROOT path is: /project/6000502/ranaab/kinGEMs_v2
 2026-02-04 18:24:23.868 | INFO     | kinGEMs.config:<module>:12 - PROJ_ROOT path is: /project/6000502/ranaab/kinGEMs_v2
 2026-02-04 18:24:25.208 | INFO     | kinGEMs.config:<module>:12 - PROJ_ROOT path is: /project/6000502/ranaab/kinGEMs_v2
+slurmstepd: error: *** JOB 21765723 ON fc30570 CANCELLED AT 2026-02-05T03:50:16 DUE TO TIME LIMIT ***

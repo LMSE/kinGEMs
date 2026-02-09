@@ -714,6 +714,179 @@ def plot_annealing_progress(iterations, biomasses, output_path=None, show=False)
 
     return plt.gcf()
 
+
+def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
+                                  figsize=(14, 10), show=False, model_name=None):
+    """
+    Compare initial and post-annealing kcat values with multiple visualizations.
+
+    Creates a comprehensive comparison showing:
+    1. Scatter plot of initial vs tuned kcat values
+    2. Histogram comparison of distributions
+    3. Summary statistics
+
+    Parameters
+    ----------
+    initial_df : pandas.DataFrame
+        DataFrame with initial kcat values (must have 'kcat_mean' column)
+    tuned_df : pandas.DataFrame
+        DataFrame with tuned kcat values (must have 'kcat_updated' column)
+    output_path : str, optional
+        Path to save the figure
+    figsize : tuple, optional
+        Figure size (width, height)
+    show : bool, optional
+        Whether to display the plot
+    model_name : str, optional
+        Name of the model for plot title
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The plot figure
+    """
+    set_plotting_style()
+
+    # Check for required columns
+    if 'kcat_mean' not in initial_df.columns:
+        raise ValueError("No 'kcat_mean' column found in initial_df")
+
+    if 'kcat_updated' not in tuned_df.columns:
+        raise ValueError("No 'kcat_updated' column found in tuned_df")
+
+    # Merge dataframes on reaction and gene identifiers
+    merge_cols = []
+    if 'Reactions' in initial_df.columns and 'Reactions' in tuned_df.columns:
+        merge_cols.append('Reactions')
+    if 'Single_gene' in initial_df.columns and 'Single_gene' in tuned_df.columns:
+        merge_cols.append('Single_gene')
+
+    if not merge_cols:
+        raise ValueError("Cannot merge dataframes: no common identifier columns found")
+
+    # Merge and clean data
+    merged = pd.merge(
+        initial_df[merge_cols + ['kcat_mean']],
+        tuned_df[merge_cols + ['kcat_updated']],
+        on=merge_cols,
+        how='inner'
+    ).dropna(subset=['kcat_mean', 'kcat_updated'])
+
+    if len(merged) == 0:
+        print("Warning: No matching kcat values found between initial and tuned datasets")
+        return None
+
+    # Calculate statistics
+    initial_median = merged['kcat_mean'].median()
+    tuned_median = merged['kcat_updated'].median()
+    fold_changes = merged['kcat_updated'] / merged['kcat_mean']
+    median_fold_change = fold_changes.median()
+    n_increased = (merged['kcat_updated'] > merged['kcat_mean']).sum()
+    n_decreased = (merged['kcat_updated'] < merged['kcat_mean']).sum()
+
+    # Create figure with subplots - add space for stats on right
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3, width_ratios=[1, 1, 0.75])
+
+    # 1. Scatter plot: Initial vs Tuned
+    ax1 = fig.add_subplot(gs[0, :2])
+    ax1.scatter(merged['kcat_mean'], merged['kcat_updated'], alpha=0.6, s=50, color='#1f77b4')
+
+    # Add diagonal line (y=x)
+    lims = [
+        min(merged['kcat_mean'].min(), merged['kcat_updated'].min()),
+        max(merged['kcat_mean'].max(), merged['kcat_updated'].max())
+    ]
+    ax1.plot(lims, lims, 'k--', alpha=0.5, linewidth=2, label='No change (y=x)')
+
+    ax1.set_xscale('log')
+    ax1.set_yscale('log')
+    ax1.set_xlabel('Initial kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
+    ax1.set_ylabel('Post-Annealing kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
+    title = 'Initial vs Post-Annealing kcat Values'
+    if model_name:
+        title = f'{model_name}: {title}'
+    ax1.set_title(title, fontsize=FONT_SIZES['title'], fontweight='bold')
+    ax1.legend(fontsize=FONT_SIZES['legend'])
+    ax1.grid(True, alpha=0.3)
+
+    # 2. KDE: Initial kcat distribution
+    ax2 = fig.add_subplot(gs[1, 0])
+    # Use log10 transformed data for KDE
+    log_initial = np.log10(merged['kcat_mean'])
+    log_initial_clean = log_initial[np.isfinite(log_initial)]
+
+    if len(log_initial_clean) > 1:
+        from scipy.stats import gaussian_kde
+        kde_initial = gaussian_kde(log_initial_clean)
+        x_range = np.linspace(log_initial_clean.min(), log_initial_clean.max(), 200)
+        ax2.fill_between(10**x_range, kde_initial(x_range), alpha=0.7, color='#ff7f0e', label='Initial kcat')
+        ax2.plot(10**x_range, kde_initial(x_range), color='#cc6600', linewidth=2)
+
+    ax2.axvline(initial_median, color='red', linestyle='--', linewidth=2.5, label=f'Median: {initial_median:.1f}')
+    ax2.set_xscale('log')
+    ax2.set_xlabel('kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
+    ax2.set_ylabel('Density', fontsize=FONT_SIZES['axis_label'])
+    ax2.set_title('Initial kcat Distribution', fontsize=FONT_SIZES['subtitle'])
+    ax2.legend(fontsize=FONT_SIZES['legend'])
+    ax2.grid(True, alpha=0.3, axis='y')
+
+    # 3. KDE: Post-annealing kcat distribution
+    ax3 = fig.add_subplot(gs[1, 1])
+    # Use log10 transformed data for KDE
+    log_tuned = np.log10(merged['kcat_updated'])
+    log_tuned_clean = log_tuned[np.isfinite(log_tuned)]
+
+    if len(log_tuned_clean) > 1:
+        kde_tuned = gaussian_kde(log_tuned_clean)
+        x_range = np.linspace(log_tuned_clean.min(), log_tuned_clean.max(), 200)
+        ax3.fill_between(10**x_range, kde_tuned(x_range), alpha=0.7, color='#2ca02c', label='Post-Annealing kcat')
+        ax3.plot(10**x_range, kde_tuned(x_range), color='#1a7a1a', linewidth=2)
+
+    ax3.axvline(tuned_median, color='red', linestyle='--', linewidth=2.5, label=f'Median: {tuned_median:.1f}')
+    ax3.set_xscale('log')
+    ax3.set_xlabel('kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
+    ax3.set_ylabel('Density', fontsize=FONT_SIZES['axis_label'])
+    ax3.set_title('Post-Annealing kcat Distribution', fontsize=FONT_SIZES['subtitle'])
+    ax3.legend(fontsize=FONT_SIZES['legend'])
+    ax3.grid(True, alpha=0.3, axis='y')
+
+    # 4. Statistics panel on the right
+    ax_stats = fig.add_subplot(gs[:, 2])
+    ax_stats.axis('off')
+
+    stats_text = (
+        f'Summary Statistics\n'
+        f'{"="*20}\n\n'
+        f'N = {len(merged)}\n\n'
+        f'Median initial:\n{initial_median:.1f} 1/hr\n\n'
+        f'Median tuned:\n{tuned_median:.1f} 1/hr\n\n'
+        f'Median fold change:\n{median_fold_change:.2f}×\n\n'
+        f'Increased:\n{n_increased}\n({100*n_increased/len(merged):.1f}%)\n\n'
+        f'Decreased:\n{n_decreased}\n({100*n_decreased/len(merged):.1f}%)'
+    )
+
+    ax_stats.text(0.03, 0.5, stats_text, transform=ax_stats.transAxes,
+                 fontsize=FONT_SIZES['legend'], verticalalignment='center',
+                 fontweight='bold', family='monospace',
+                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.9,
+                          edgecolor='black', linewidth=2, pad=1))
+
+    plt.tight_layout()
+
+    # Save if output path provided
+    if output_path:
+        ensure_dir_exists(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=DEFAULT_DPI, bbox_inches='tight')
+        print(f"  Saved kcat comparison plot to: {output_path}")
+
+    # Show if requested
+    if show:
+        plt.show()
+
+    return fig
+
+
 def analyze_kcat_changes(original_kcat_file, optimized_kcat_df, output_dir=None, prefix=""):
     """
     Analyze and visualize changes in kcat values after optimization.

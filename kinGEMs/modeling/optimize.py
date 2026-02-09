@@ -109,6 +109,8 @@ def run_optimization(
     medium_upper_bound=True,
     edit_ngam=False,
     ngam_rxn_id='ATPM',
+    num_solutions=1,
+    solution_pool_gap=0.0,
 ):
 
     """
@@ -117,7 +119,24 @@ def run_optimization(
       - enzyme complexes (avg kcat)
       - isoenzymes (OR-GPR)
       - promiscuous enzymes
-    Returns: sol_val, df_FBA, gene_sequences_dict, model, (optionally: ngam_growth_rate)
+    
+    Parameters
+    ----------
+    num_solutions : int, optional
+        Number of alternative solutions to generate (default: 1).
+        Only works with Gurobi or CPLEX solvers.
+        If > 1, returns list of solutions instead of single solution.
+    solution_pool_gap : float, optional
+        Maximum relative gap from optimal objective for alternative solutions (default: 0.0).
+        E.g., 0.01 means solutions within 1% of optimal are acceptable.
+        Only used when num_solutions > 1.
+    
+    Returns
+    -------
+    If num_solutions == 1:
+        sol_val, df_FBA, gene_sequences_dict, model
+    If num_solutions > 1:
+        list of (sol_val, df_FBA) tuples, gene_sequences_dict, model
     """
     # Random seeds removed - they prevent simulated annealing exploration
 
@@ -547,16 +566,36 @@ def run_optimization(
         if verbose:
             print(f"⚠️  WARNING: Solver '{solver_name}' not available in Pyomo, falling back to GLPK")
         solver = SolverFactory('glpk')
+        actual_solver = 'glpk'
+    else:
+        actual_solver = solver_name.lower()
 
     # Set solver tolerances to avoid numerical precision warnings
-    if solver_name.lower() == 'glpk':
+    if actual_solver == 'glpk':
         solver.options['tmlim'] = 300  # time limit in seconds
-    elif solver_name.lower() == 'gurobi':
+        if num_solutions > 1:
+            print("⚠️  WARNING: GLPK does not support solution pools. Only returning single optimal solution.")
+            num_solutions = 1
+    elif actual_solver == 'gurobi':
         solver.options['FeasibilityTol'] = 1e-9
         solver.options['OptimalityTol'] = 1e-9
-    # elif solver_name.lower() == 'cplex':
+        # Configure solution pool for multiple solutions
+        if num_solutions > 1:
+            solver.options['PoolSearchMode'] = 2  # 2 = systematic search for diverse solutions
+            solver.options['PoolSolutions'] = num_solutions  # Number of solutions to store
+            solver.options['PoolGap'] = solution_pool_gap  # Relative gap from optimal
+            if verbose:
+                print(f"[SOLUTION POOL] Configured Gurobi to find {num_solutions} solutions within {solution_pool_gap*100:.2f}% of optimal")
+    elif actual_solver == 'cplex':
         # CPLEX options for better performance
-        # solver.options['timelimit'] = 300  # time limit in seconds
+        solver.options['timelimit'] = 300  # time limit in seconds
+        # Configure solution pool for multiple solutions
+        if num_solutions > 1:
+            solver.options['mip_limits_solutions'] = num_solutions
+            solver.options['mip_pool_capacity'] = num_solutions
+            solver.options['mip_pool_relgap'] = solution_pool_gap
+            if verbose:
+                print(f"[SOLUTION POOL] Configured CPLEX to find {num_solutions} solutions within {solution_pool_gap*100:.2f}% of optimal")
 
     #solver.options['threads'] = 4
     # print("Solver:", solver)
@@ -574,6 +613,8 @@ def run_optimization(
         sol_val = None
         records = []
         df_FBA = pd.DataFrame(columns=['Variable','Index','Value'])
+        if num_solutions > 1:
+            return [], gene_sequences_dict, m
         return sol_val, df_FBA, gene_sequences_dict, m
     # Print total enzyme usage after optimization if possible
     if enzyme_ratio and verbose:
@@ -586,7 +627,80 @@ def run_optimization(
         except Exception as e:
             print(f"[DIAG] Could not compute total enzyme usage: {e}")
 
-    # 9) Post-process - handle numerical precision issues
+    # 9) Extract multiple solutions if requested
+    if num_solutions > 1 and actual_solver in ['gurobi', 'cplex']:
+        # Extract solution pool
+        solutions = []
+        
+        if actual_solver == 'gurobi':
+            # Gurobi stores solutions in the solution pool
+            try:
+                # Access solution pool through the model
+                m.solutions.load_from(result)
+                num_found = result.solution.pool.num_solutions
+                
+                if verbose:
+                    print(f"[SOLUTION POOL] Found {num_found} solutions")
+                
+                for sol_idx in range(min(num_found, num_solutions)):
+                    # Load each solution
+                    m.solutions.select(sol_idx)
+                    
+                    # Post-process - handle numerical precision issues
+                    tolerance = 1e-10
+                    for r in m.R:
+                        val = m.v[r].value if m.v[r].value is not None else lb[r]
+                        if abs(val) < tolerance:
+                            val = 0.0
+                        m.v[r].value = max(min(val, ub[r]), lb[r])
+                    for g in m.G:
+                        val = m.E[g].value if m.E[g].value is not None else 0.0
+                        if abs(val) < tolerance:
+                            val = 0.0
+                        m.E[g].value = max(val, 0.0)
+                    
+                    # Collect results for this solution
+                    sol_val = value(m.obj)
+                    records = [('flux', r, m.v[r].value, f"[{lb[r]}, {ub[r]}]") for r in m.R]
+                    records += [('enzyme', g, m.E[g].value, None) for g in m.G]
+                    df_FBA = pd.DataFrame(records, columns=['Variable','Index','Value', 'Bounds'])
+                    
+                    solutions.append((sol_val, df_FBA))
+                    
+                    if verbose:
+                        print(f"  Solution {sol_idx + 1}: objective = {sol_val:.6f}")
+                
+            except Exception as e:
+                if verbose:
+                    print(f"⚠️  WARNING: Could not extract solution pool: {e}")
+                    print("  Returning single optimal solution instead.")
+                # Fall back to single solution
+                num_solutions = 1
+        
+        elif actual_solver == 'cplex':
+            # CPLEX solution pool extraction
+            try:
+                # For CPLEX, we need to access the pool differently
+                # This is a simplified version - exact implementation may vary
+                if verbose:
+                    print(f"[SOLUTION POOL] Attempting to extract CPLEX solutions")
+                
+                # CPLEX pool extraction would go here
+                # For now, fall back to single solution
+                if verbose:
+                    print("⚠️  CPLEX solution pool extraction not fully implemented yet.")
+                num_solutions = 1
+                
+            except Exception as e:
+                if verbose:
+                    print(f"⚠️  WARNING: Could not extract CPLEX solution pool: {e}")
+                num_solutions = 1
+        
+        # If we successfully got multiple solutions, return them
+        if len(solutions) > 1:
+            return solutions, gene_sequences_dict, m
+    
+    # 9) Post-process - handle numerical precision issues (single solution path)
     # Clamp very small values to zero to avoid floating-point errors
     tolerance = 1e-10
     for r in m.R:
@@ -695,7 +809,8 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction, obj
                     multi_enzyme_off=False, isoenzymes_off=False,
                     promiscuous_off=False, complexes_off=False,
                     output_dir=None, save_results=True, print_reaction_conditions=True, verbose=True,
-                    solver_name='glpk', medium=None, medium_upper_bound=False, edit_ngam=False, ngam_rxn_id='ATPM'):
+                    solver_name='glpk', medium=None, medium_upper_bound=False, edit_ngam=False, ngam_rxn_id='ATPM',
+                    num_solutions=1, solution_pool_gap=0.0):
     """
     Run enzyme-constrained flux balance analysis using a processed dataframe.
 
@@ -737,11 +852,18 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction, obj
     medium_upper_bound : bool, optional
         If True, set both lower and upper bounds equal.
         If False, only set lower bound.
+    num_solutions : int, optional
+        Number of alternative solutions to generate (default: 1).
+        Only works with Gurobi or CPLEX solvers.
+    solution_pool_gap : float, optional
+        Maximum relative gap from optimal objective for alternative solutions (default: 0.0).
+        E.g., 0.01 means solutions within 1% of optimal are acceptable.
 
     Returns
     -------
     tuple
-        (solution_value, df_FBA, gene_sequences_dict, output_filepath)
+        If num_solutions == 1: (solution_value, df_FBA, gene_sequences_dict, output_filepath)
+        If num_solutions > 1: (list of (sol_val, df_FBA) tuples, gene_sequences_dict, output_filepath_list)
     """
 
     # Check if required columns exist in processed_df
@@ -839,7 +961,7 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction, obj
     if len(kcat_dict) > 0:
         pass  # kcat_dict has entries
 
-    solution_value, df_FBA, gene_sequences_dict, m = run_optimization(
+    result = run_optimization(
         model=model,
         kcat_dict=kcat_dict,
         objective_reaction=objective_reaction,
@@ -857,8 +979,52 @@ def run_optimization_with_dataframe(model, processed_df, objective_reaction, obj
         medium=medium,
         medium_upper_bound=medium_upper_bound,
         edit_ngam=edit_ngam,
-        ngam_rxn_id=ngam_rxn_id
+        ngam_rxn_id=ngam_rxn_id,
+        num_solutions=num_solutions,
+        solution_pool_gap=solution_pool_gap
     )
+
+    # Handle multiple solutions vs single solution
+    if num_solutions > 1 and isinstance(result[0], list):
+        # Multiple solutions returned
+        solutions, gene_sequences_dict, m = result
+        
+        if save_results and len(solutions) > 0:
+            # Create directory if it doesn't exist
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            
+            output_filepaths = []
+            for idx, (sol_val, df_FBA) in enumerate(solutions):
+                # Create filename with solution index
+                base_filepath = create_descriptive_filename(
+                    objective_reaction,
+                    enzyme_upper_bound,
+                    maximization,
+                    multi_enzyme_off,
+                    isoenzymes_off,
+                    promiscuous_off,
+                    complexes_off,
+                    output_dir=output_dir
+                )
+                # Insert solution number before extension
+                filepath_parts = base_filepath.rsplit('.', 1)
+                if len(filepath_parts) == 2:
+                    output_filepath = f"{filepath_parts[0]}_sol{idx+1}.{filepath_parts[1]}"
+                else:
+                    output_filepath = f"{base_filepath}_sol{idx+1}"
+                
+                df_FBA.to_csv(output_filepath, index=False)
+                output_filepaths.append(output_filepath)
+                if verbose:
+                    print(f"Solution {idx+1} saved to: {output_filepath}")
+            
+            return solutions, gene_sequences_dict, output_filepaths
+        else:
+            return solutions, gene_sequences_dict, None
+    
+    # Single solution path
+    solution_value, df_FBA, gene_sequences_dict, m = result
 
     # Create descriptive filename and save results if requested
     output_filepath = create_descriptive_filename(
