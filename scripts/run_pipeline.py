@@ -257,6 +257,8 @@ class PipelineResults:
     kingems_fva_post_tuning_path: str | None
     run_id: str
     output_dir: str
+    optimal_ngam: float | None
+    optimal_gam: float | None
 
 
 def run_pipeline_core(
@@ -307,6 +309,7 @@ def run_pipeline_core(
     medium_upper_bound = config.get('medium_upper_bound', True)
     fva_config = config.get('fva', {})
     sa_config = config.get('simulated_annealing', {})
+    results_subdir = config.get('results_subdir', None)  # Optional subdirectory for results
 
     # Detect model type
     is_modelseed = is_modelseed_model(model_name)
@@ -324,7 +327,11 @@ def run_pipeline_core(
     os.makedirs(processed_data_dir, exist_ok=True)
 
     # File paths
-    model_path = os.path.join(raw_data_dir, f"{model_name}.xml")
+    # Check if model is in BiGG_models subdirectory
+    if results_subdir == "BiGG_models":
+        model_path = os.path.join(raw_data_dir, "BiGG_models", f"{model_name}.xml")
+    else:
+        model_path = os.path.join(raw_data_dir, f"{model_name}.xml")
     substrates_output = os.path.join(interim_data_dir, f"{model_name}_substrates.csv")
     sequences_output = os.path.join(interim_data_dir, f"{model_name}_sequences.csv")
     merged_data_output = os.path.join(interim_data_dir, f"{model_name}_merged_data.csv")
@@ -339,6 +346,8 @@ def run_pipeline_core(
 
     # Determine biomass reaction
     temp_model = cobra.io.read_sbml_model(model_path)
+    # Set solver before any optimization
+    temp_model.solver = solver_name
     biomass_reaction = config.get('biomass_reaction') or determine_biomass_reaction(temp_model)
     log(f"Biomass reaction: {biomass_reaction}")
     log(f"Baseline growth: {temp_model.slim_optimize():.4f}")
@@ -350,6 +359,7 @@ def run_pipeline_core(
         substrate_df = pd.read_csv(substrates_output)
         sequences_df = pd.read_csv(sequences_output)
         model = load_model(model_path)
+        model.solver = solver_name  # Set solver before any operations
         model = convert_to_irreversible(model)
     else:
         if is_modelseed:
@@ -369,6 +379,9 @@ def run_pipeline_core(
                 organism=organism,
                 convert_irreversible=True
             )
+
+    # Set solver after model preparation
+    model.solver = solver_name
     log(f"  Model: {len(model.genes)} genes, {len(model.reactions)} reactions")
 
     # === Step 2: Merge substrate and sequence data ===
@@ -490,6 +503,137 @@ def run_pipeline_core(
         final_info_path = os.path.join(output_dir, "final_model_info.csv")
         df_new.to_csv(final_info_path, index=False)
 
+    # Generate kcat comparison plot
+    log("  Generating kcat comparison plot...")
+    kcat_comparison_plot_path = os.path.join(output_dir, "kcat_comparison_initial_vs_tuned.png")
+    try:
+        plot_kcat_annealing_comparison(
+            initial_df=processed_data,
+            tuned_df=df_new,
+            output_path=kcat_comparison_plot_path,
+            model_name=model_name,
+            show=False
+        )
+        log(f"  Saved kcat comparison plot: {kcat_comparison_plot_path}")
+    except Exception as e:
+        log(f"  Warning: Could not generate kcat comparison plot: {e}")
+
+    # === Step 5b: Maintenance Parameter Sweep (if enabled) ===
+    optimal_ngam = None
+    optimal_gam = None
+    fva_model = model  # Default to base model
+
+    enable_maintenance_sweep = config.get('enable_maintenance_sweep', False)
+    if enable_maintenance_sweep:
+        from copy import deepcopy
+        log("=== Step 5b: Maintenance Parameters Sweep ===")
+        maintenance_config = config.get('maintenance_sweep', {})
+        ngam_rxn_id = config.get('ngam_rxn_id', 'ATPM')
+        ngam_range = maintenance_config.get('ngam_range', None)
+        gam_range = maintenance_config.get('gam_range', None)
+        biomass_goal = sa_config.get('biomass_goal', cobra_biomass)
+
+        log(f"  Target: Match target biomass ({biomass_goal:.4f})")
+        log(f"  NGAM range: {ngam_range if ngam_range else 'default'}")
+        log(f"  GAM range: {gam_range if gam_range else 'constant'}")
+
+        maintenance_results = sweep_maintenance_parameters(
+            model=model,
+            processed_data=df_new,  # Use tuned parameters
+            biomass_reaction=biomass_reaction,
+            ngam_rxn_id=ngam_rxn_id,
+            ngam_range=ngam_range,
+            gam_range=gam_range,
+            enzyme_upper_bound=enzyme_upper_bound,
+            output_dir=output_dir,
+            medium=medium,
+            medium_upper_bound=medium_upper_bound,
+            biomass_goal=biomass_goal,
+            verbose=maintenance_config.get('verbose', False)
+        )
+
+        maintenance_results.to_csv(os.path.join(output_dir, 'maintenance_sweep_results.csv'), index=False)
+        log(f"  Maintenance sweep completed: {len(maintenance_results)} parameter combinations tested")
+
+        # Find optimal parameters closest to target
+        if len(maintenance_results) > 0 and maintenance_results['biomass'].max() > 0:
+            maintenance_results['distance_to_goal'] = abs(maintenance_results['biomass'] - biomass_goal)
+            best_idx = maintenance_results['distance_to_goal'].idxmin()
+
+            optimal_ngam = float(maintenance_results.loc[best_idx, 'ngam'])
+            optimal_gam = float(maintenance_results.loc[best_idx, 'gam'])
+            optimal_biomass = float(maintenance_results.loc[best_idx, 'biomass'])
+
+            log(f"  Optimal maintenance parameters found:")
+            log(f"    - NGAM: {optimal_ngam:.2f} mmol/gDW/h")
+            log(f"    - GAM: {optimal_gam:.2f} mmol ATP/gDW")
+            log(f"    - Biomass: {optimal_biomass:.4f}")
+            log(f"    - Target: {biomass_goal:.4f}")
+            log(f"    - Deviation: {abs(optimal_biomass - biomass_goal):.4f}")
+
+            # Apply optimal parameters to model for FVA
+            fva_model = deepcopy(model)
+            fva_model.solver = solver_name  # Ensure solver is set after deepcopy
+
+            # Apply NGAM
+            try:
+                ngam_rxn = fva_model.reactions.get_by_id(ngam_rxn_id)
+                ngam_rxn.lower_bound = float(optimal_ngam)
+                log(f"    ✓ Applied NGAM: {optimal_ngam:.2f}")
+            except KeyError:
+                log(f"    Warning: NGAM reaction '{ngam_rxn_id}' not found")
+
+            # Apply GAM (if > 0)
+            if optimal_gam > 0:
+                try:
+                    biomass_rxn = fva_model.reactions.get_by_id(biomass_reaction)
+                    atp_met_ids = ['atp_c', 'ATP_c', 'cpd00002_c0']
+
+                    current_gam = None
+                    atp_met = None
+                    for met_id in atp_met_ids:
+                        try:
+                            met = fva_model.metabolites.get_by_id(met_id)
+                            if met in biomass_rxn.metabolites:
+                                current_gam = abs(biomass_rxn.metabolites[met])
+                                atp_met = met
+                                break
+                        except KeyError:
+                            continue
+
+                    if current_gam and atp_met and current_gam > 0:
+                        scale = optimal_gam / current_gam
+                        current_mets = biomass_rxn.metabolites.copy()
+
+                        met_mappings = {
+                            'h2o': ['h2o_c', 'H2O_c', 'cpd00001_c0'],
+                            'adp': ['adp_c', 'ADP_c', 'cpd00008_c0'],
+                            'pi': ['pi_c', 'Pi_c', 'cpd00009_c0'],
+                            'h': ['h_c', 'H_c', 'cpd00067_c0']
+                        }
+
+                        mets_to_scale = [atp_met]
+                        for met_type, possible_ids in met_mappings.items():
+                            for met_id in possible_ids:
+                                try:
+                                    met = fva_model.metabolites.get_by_id(met_id)
+                                    if met in current_mets:
+                                        mets_to_scale.append(met)
+                                        break
+                                except KeyError:
+                                    continue
+
+                        for met in mets_to_scale:
+                            old_coef = current_mets[met]
+                            biomass_rxn.add_metabolites({met: old_coef * (scale - 1.0)}, combine=True)
+
+                        log(f"    ✓ Applied GAM: scaled from {current_gam:.2f} to {optimal_gam:.2f}")
+
+                except KeyError:
+                    log(f"    Warning: Biomass reaction '{biomass_reaction}' not found")
+        else:
+            log("    Warning: No feasible solutions found in maintenance sweep")
+
     # === Step 6: Run FVA ===
     cobra_fva_path = None
     kingems_fva_pre_path = None
@@ -499,15 +643,15 @@ def run_pipeline_core(
         log("=== Step 6: Running Flux Variability Analysis ===")
         opt_ratio = fva_config.get('opt_ratio', 0.9)
 
-        # COBRApy FVA
+        # COBRApy FVA (use fva_model with optimal maintenance if available)
         cobra_fva_path = os.path.join(output_dir, f"{model_name}_cobra_fva_results.csv")
         log(f"  Running COBRApy FVA (opt_ratio={opt_ratio})...")
-        cobra_fva_results = cobra_fva(model, fraction_of_optimum=opt_ratio)
+        cobra_fva_results = cobra_fva(fva_model, fraction_of_optimum=opt_ratio)
         cobra_fva_df = pd.DataFrame({
             "Reactions": cobra_fva_results.index,
             "Min Solutions": cobra_fva_results['minimum'],
             "Max Solutions": cobra_fva_results['maximum'],
-            "Solution Biomass": [model.slim_optimize()] * len(cobra_fva_results)
+            "Solution Biomass": [fva_model.slim_optimize()] * len(cobra_fva_results)
         })
         cobra_fva_df.to_csv(cobra_fva_path, index=False)
         log(f"  Saved COBRApy FVA: {cobra_fva_path}")
@@ -517,9 +661,9 @@ def run_pipeline_core(
         run_fva_analysis(model, processed_data, biomass_reaction, enzyme_upper_bound,
                         output_dir, f"{model_name}_pre_tuning", fva_config)
 
-        # kinGEMs FVA (post-tuning)
+        # kinGEMs FVA (post-tuning with optimal maintenance)
         kingems_fva_post_path = os.path.join(output_dir, f"{model_name}_fva_results.csv")
-        run_fva_analysis(model, df_new, biomass_reaction, enzyme_upper_bound,
+        run_fva_analysis(fva_model, df_new, biomass_reaction, enzyme_upper_bound,
                         output_dir, model_name, fva_config)
 
     log("=== Pipeline core complete ===")
@@ -535,7 +679,9 @@ def run_pipeline_core(
         kingems_fva_pre_tuning_path=kingems_fva_pre_path,
         kingems_fva_post_tuning_path=kingems_fva_post_path,
         run_id=run_id,
-        output_dir=output_dir
+        output_dir=output_dir,
+        optimal_ngam=optimal_ngam,
+        optimal_gam=optimal_gam
     )
 
 
@@ -711,13 +857,10 @@ def main():
     # Extract configuration
     model_name = config['model_name']
     organism = config.get('organism', 'Unknown')
-    enzyme_upper_bound = config.get('enzyme_upper_bound', 0.15)
-    enable_fva = config.get('enable_fva', False)
     enable_biolog = config.get('enable_biolog_validation', False)
-    enable_maintenance_sweep = config.get('enable_maintenance_sweep', False)
-    solver_name = config.get('solver', 'glpk')  # Default to GLPK (free solver)
-    edit_ngam = config.get('edit_ngam', False)
+    solver_name = config.get('solver', 'glpk')
     ngam_rxn_id = config.get('ngam_rxn_id', 'ATPM')
+    results_subdir = config.get('results_subdir', None)  # Optional subdirectory for results
 
     # Detect model type
     is_modelseed = is_modelseed_model(model_name)
@@ -728,24 +871,15 @@ def main():
 
     # Setup paths
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    data_dir = os.path.join(project_root, "data")
-    raw_data_dir = os.path.join(data_dir, "raw")
-    interim_data_dir = os.path.join(data_dir, "interim", model_name)
-    processed_data_dir = os.path.join(data_dir, "processed", model_name)
-    CPIPred_data_dir = os.path.join(data_dir, "interim", "CPI-Pred predictions")
     results_dir = os.path.join(project_root, "results")
-    tuning_results_dir = os.path.join(results_dir, "tuning_results", run_id)
+
+    # Use custom subdirectory if specified in config
+    if results_subdir:
+        tuning_results_dir = os.path.join(results_dir, "tuning_results", results_subdir, run_id)
+    else:
+        tuning_results_dir = os.path.join(results_dir, "tuning_results", run_id)
+
     os.makedirs(tuning_results_dir, exist_ok=True)
-
-    # File paths
-    model_path = os.path.join(raw_data_dir, f"{model_name}.xml")
-
-
-
-    substrates_output = os.path.join(interim_data_dir, f"{model_name}_substrates.csv")
-    sequences_output = os.path.join(interim_data_dir, f"{model_name}_sequences.csv")
-    merged_data_output = os.path.join(interim_data_dir, f"{model_name}_merged_data.csv")
-    processed_data_output = os.path.join(processed_data_dir, f"{model_name}_processed_data.csv")
 
     print("\n" + "="*70)
     print(f"=== kinGEMs Pipeline for {model_name} ===")
@@ -754,482 +888,37 @@ def main():
     print(f"Model type: {model_type}")
     print(f"Organism: {organism}")
     print(f"Results directory: {tuning_results_dir}")
-    print(f"Solver: {solver_name}")
     if FORCE_REGENERATE:
         print("⚠️  Force regenerate mode: will regenerate all intermediate files")
     print("="*70)
 
-    # Print configuration summary
-    print("\n=== Configuration Summary ===")
-    print(f"Config file: {config_path}")
-    print(f"Model name: {model_name}")
-    print(f"Enzyme upper bound: {enzyme_upper_bound}")
-    print(f"Enable FVA: {enable_fva}")
-    print(f"Enable Biolog validation: {enable_biolog}")
-    print(f"Enable maintenance sweep: {enable_maintenance_sweep}")
-
-    # Print FVA config if enabled
-    if enable_fva:
-        fva_config = config.get('fva', {})
-        print("\nFVA Settings:")
-        print(f"  Parallel execution: {fva_config.get('parallel', False)}")
-        print(f"  Biomass constraint ratio: {fva_config.get('opt_ratio', 0.9)}")
-        if fva_config.get('parallel'):
-            print(f"  Workers: {fva_config.get('workers', 'auto')}")
-            print(f"  Method: {fva_config.get('method', 'dask')}")
-
-    # Print simulated annealing config
-    sa_config = config.get('simulated_annealing', {})
-    print("\nSimulated Annealing Settings:")
-    print(f"  Temperature: {sa_config.get('temperature', 1.0)}")
-    print(f"  Cooling rate: {sa_config.get('cooling_rate', 0.95)}")
-    print(f"  Min temperature: {sa_config.get('min_temperature', 0.01)}")
-    print(f"  Max iterations: {sa_config.get('max_iterations', 100)}")
-    print(f"  Max unchanged iterations: {sa_config.get('max_unchanged_iterations', 5)}")
-    print(f"  Change threshold: {sa_config.get('change_threshold', 0.009)}")
-    print(f"  Biomass goal: {sa_config.get('biomass_goal', 0.5)}")
-    print(f"  Top enzymes to tune: {sa_config.get('n_top_enzymes', 65)}")
-
-    # Print Biolog config if enabled
-    if enable_biolog:
-        biolog_cfg = config.get('biolog_validation', {})
-        print("\nBiolog Validation Settings:")
-        print(f"  Experiments file: {biolog_cfg.get('experiments_file', 'N/A')}")
-        print(f"  Sheet name: {biolog_cfg.get('sheet_name', 'Ecoli')}")
-        print(f"  Reference compound: {biolog_cfg.get('reference_compound', 'cpd00027')}")
-        print(f"  Uptake rate: {biolog_cfg.get('uptake_rate', 100.0)}")
-
-    print("="*70)
-
-    # Determine biomass reaction
-    temp_model = cobra.io.read_sbml_model(model_path)
-    biomass_reaction = config.get('biomass_reaction') or determine_biomass_reaction(temp_model)
-    print(f"\nBiomass reaction: {biomass_reaction}")
-    print(f"\nBaseline growth: {temp_model.slim_optimize():.4f}")
-
-    # === Step 1: Prepare model data ===
-    print("\n=== Step 1: Preparing model data ===")
-    if not FORCE_REGENERATE and os.path.exists(substrates_output) and os.path.exists(sequences_output):
-        print("  ✓ Found existing files, loading cached data:")
-        print(f"    - {substrates_output}")
-        print(f"    - {sequences_output}")
-        substrate_df = pd.read_csv(substrates_output)
-        sequences_df = pd.read_csv(sequences_output)
-        model = load_model(model_path)
-        # orig_model = model.copy()  # Keep original for comparison
-        # Convert to irreversible for proper enzyme constraint handling
-        model = convert_to_irreversible(model)
-        print("  ✓ Loaded model and converted to irreversible reactions. Biomass: {:.4f}".format(model.slim_optimize()))
-    else:
-        if FORCE_REGENERATE:
-            print("  ⟳ Regenerating model data (--force flag)")
-        else:
-            print("  No cached files found, preparing model data...")
-
-        if is_modelseed:
-            metadata_dir = config.get('metadata_dir', os.path.join(data_dir, "Biolog experiments"))
-            # orig_model = load_model(model_path)
-            model, substrate_df, sequences_df = prepare_modelseed_model_data(
-                model_path=model_path,
-                substrates_output=substrates_output,
-                sequences_output=sequences_output,
-                organism=organism,
-                metadata_dir=metadata_dir
-            )
-        else:
-            # orig_model = load_model(model_path)
-            model, substrate_df, sequences_df = prepare_model_data(
-                model_path=model_path,
-                substrates_output=substrates_output,
-                sequences_output=sequences_output,
-                organism=organism,
-                convert_irreversible=True  # Enable irreversible conversion for enzyme constraints
-            )
-        print("  ✓ Generated and saved substrates and sequences")
-
-    # Loading model again to pass to any cobrapy FVA later
-    og_model = load_model(model_path)
-
-    print(f"  Model: {len(model.genes)} genes, {len(model.reactions)} reactions")
-
-    # === Step 2: Merge substrate and sequence data ===
-    print("\n=== Step 2: Merging substrate and sequence data ===")
-    if not FORCE_REGENERATE and os.path.exists(merged_data_output):
-        print("  ✓ Found existing file, loading cached data:")
-        print(f"    - {merged_data_output}")
-        merged_data = pd.read_csv(merged_data_output)
-    else:
-        if FORCE_REGENERATE:
-            print("  ⟳ Regenerating merged data (--force flag)")
-        else:
-            print("  No cached file found, merging data...")
-        merged_data = merge_substrate_sequences(
-            substrate_df=substrate_df,
-            sequences_df=sequences_df,
-            model=model,
-            output_path=merged_data_output
-        )
-        print("  ✓ Generated and saved merged data")
-
-    print(f"  Merged data: {len(merged_data)} rows")
-
-    # === Step 3: Process kcat predictions ===
-    # Find predictions file with flexible naming
-    predictions_csv_path = find_predictions_file(model_name, CPIPred_data_dir)
-    print("\n=== Step 3: Processing CPI-Pred kcat values & annotating model ===")
-    if not FORCE_REGENERATE and os.path.exists(processed_data_output):
-        print("  ✓ Found existing file, loading cached data:")
-        print(f"    - {processed_data_output}")
-        processed_data = pd.read_csv(processed_data_output)
-    else:
-        if FORCE_REGENERATE:
-            print("  ⟳ Regenerating processed data (--force flag)")
-        else:
-            print("  No cached file found, processing kcat predictions...")
-        processed_data = process_kcat_predictions(
-            merged_df=merged_data,
-            predictions_csv_path=predictions_csv_path,
-            output_path=processed_data_output
-        )
-        print("  ✓ Generated and saved processed data")
-
-    print(f"  Processed data: {len(processed_data)} rows")
-
-    # Ensure kcat column exists
-    if 'kcat_mean' in processed_data.columns and 'kcat' not in processed_data.columns:
-        processed_data['kcat'] = processed_data['kcat_mean']
-    elif 'kcat_y' in processed_data.columns and 'kcat' not in processed_data.columns:
-        processed_data['kcat'] = processed_data['kcat_y']
-
-    # Annotate model
-    model = annotate_model_with_kcat_and_gpr(model=model, df=processed_data)
-
-    rxn_with_kcat = sum(1 for rxn in model.reactions
-                        if hasattr(rxn, 'annotation') and 'kcat' in rxn.annotation
-                        and rxn.annotation['kcat'] not in [None, '', 0, '0'])
-    print(f"  Reactions with kcat: {rxn_with_kcat}/{len(model.reactions)}")
-
-    # === Step 4: Optimization ===
-    print("\n=== Step 4: Running optimization ===")
-
-    # Extract medium constraints from config
-    medium_temp = config.get('medium', None)
-    medium_upper_bound_temp = config.get('medium_upper_bound', True)
-    # First run standard COBRApy optimization for comparison
-    print("  Running standard COBRApy FBA (no enzyme constraints)...")
-    # Apply medium constraints if specified
-    if medium_temp is not None:
-        mode = "fixed fluxes" if medium_upper_bound_temp else "max uptake rates"
-        print(f"  Applying medium conditions ({mode}) to COBRApy model:")
-        for rxn_id, flux_value in medium_temp.items():
-            try:
-                rxn = model.reactions.get_by_id(rxn_id)
-                print(f"   Original fluxes for reaction {rxn_id}: LB={rxn.lower_bound}, UB={rxn.upper_bound}")
-                rxn.lower_bound = flux_value
-                if medium_upper_bound_temp:
-                    rxn.upper_bound = flux_value
-                    print(f"    Fixed {rxn_id}: {flux_value}")
-                else:
-                    print(f"    Set {rxn_id} lower bound: {flux_value} (upper: {rxn.upper_bound})")
-            except KeyError:
-                print(f"    Warning: Reaction '{rxn_id}' not found in model")
-    cobra_solution = model.optimize()
-    cobra_biomass = cobra_solution.objective_value
-    print(f"    COBRApy biomass: {cobra_biomass:.4f}")
-
-    # Now run enzyme-constrained optimization
-    print("  Running kinGEMs enzyme-constrained optimization...")
-    (solution_value, df_FBA, gene_sequences_dict, _) = run_optimization_with_dataframe(
-        model=model,
-        processed_df=processed_data,
-        objective_reaction=biomass_reaction,
-        enzyme_upper_bound=enzyme_upper_bound,
-        enzyme_ratio=True,
-        maximization=True,
-        multi_enzyme_off=False,
-        isoenzymes_off=False,
-        promiscuous_off=False,
-        complexes_off=False,
-        output_dir=None,
-        save_results=False,
-        print_reaction_conditions=True,
-        verbose=False,
-        solver_name=solver_name,
-        medium=medium_temp,
-        medium_upper_bound=medium_upper_bound_temp,
-        edit_ngam=edit_ngam,
-        ngam_rxn_id=ngam_rxn_id
-    )
-    print(f"    kinGEMs biomass: {solution_value:.4f}")
-
-    # Show comparison
-    reduction = (1 - solution_value / cobra_biomass) * 100 if cobra_biomass > 0 else 0
-    print("\n  Comparison:")
-    print(f"    Standard FBA:           {cobra_biomass:.4f}")
-    print(f"    Enzyme-constrained FBA: {solution_value:.4f}")
-    print(f"    Reduction due to enzyme budget: {reduction:.1f}%")
-
-    # For ModelSEED models, we need to let the optimization system handle constraints
-    # Don't manually add enzyme constraints - let simulated annealing use the optimization framework
-    if is_modelseed:
-        print("  Using ModelSEED model - constraints handled by optimization framework")
-        # Use the processed_data as-is, constraints will be calculated during optimization
-        constraint_data = processed_data
-    else:
-        print("  Using standard model - may need additional constraint processing")
-        constraint_data = processed_data
-
-    # DELETE AFTER DEBUG
-    print("Model ATPM value:", model.reactions.get_by_id('ATPM').bounds)
-
-    # === Step 5: Simulated Annealing ===
-    print("\n=== Step 5: Running simulated annealing ===")
-    sa_config = config.get('simulated_annealing', {})
-    temperature = sa_config.get('temperature', 1.0)
-    cooling_rate = sa_config.get('cooling_rate', 0.95)
-    min_temperature = sa_config.get('min_temperature', 0.01)
-    max_iterations = sa_config.get('max_iterations', 100)
-    max_unchanged_iterations = sa_config.get('max_unchanged_iterations', 5)
-    change_threshold = sa_config.get('change_threshold', 0.009)
-    biomass_goal = sa_config.get('biomass_goal', 0.5)
-    n_top_enzymes = sa_config.get('n_top_enzymes', 65)
-    verbose = sa_config.get('verbose', False)
-    medium = config.get('medium', None)
-    medium_upper_bound = config.get('medium_upper_bound', True)
-
-
-    print("  Configuration:")
-    print(f"    - Temperature: {temperature}")
-    print(f"    - Cooling rate: {cooling_rate}")
-    print(f"    - Max iterations: {max_iterations}")
-    print(f"    - Max unchanged iterations: {max_unchanged_iterations}")
-    print(f"    - Change threshold: {change_threshold}")
-    print(f"    - Biomass goal: {biomass_goal}")
-    print(f"    - Top enzymes to tune: {n_top_enzymes}")
-    if medium:
-        mode = "fixed fluxes" if medium_upper_bound else "max uptake rates"
-        print(f"    - Medium conditions: {len(medium)} reactions ({mode})")
-    print("  Starting optimization...\n")
-
-    kcat_dict, top_targets, df_new, iterations, biomasses, df_FBA = simulated_annealing(
-        model=model,
-        processed_data=constraint_data,
-        biomass_reaction=biomass_reaction,
-        objective_value=biomass_goal,
-        gene_sequences_dict=gene_sequences_dict,
+    # === Run core pipeline (Steps 1-6) ===
+    pipeline_results = run_pipeline_core(
+        config=config,
         output_dir=tuning_results_dir,
-        enzyme_fraction=enzyme_upper_bound,
-        n_top_enzymes=n_top_enzymes,
-        temperature=temperature,
-        cooling_rate=cooling_rate,
-        min_temperature=min_temperature,
-        max_iterations=max_iterations,
-        max_unchanged_iterations=max_unchanged_iterations,
-        change_threshold=change_threshold,
-        verbose=verbose,
-        medium=medium,
-        medium_upper_bound=medium_upper_bound,
-        edit_ngam=edit_ngam,
-        ngam_rxn_id=ngam_rxn_id
+        run_id=run_id,
+        force_regenerate=FORCE_REGENERATE,
+        logger=None  # Use print statements
     )
 
-    improvement = (biomasses[-1] - biomasses[0]) / biomasses[0] * 100 if biomasses[0] > 0 else 0
-    print("\n  Annealing complete!")
-    print(f"  Initial biomass: {biomasses[0]:.4f}")
-    print(f"  Final biomass: {biomasses[-1]:.4f}")
-    print(f"  Improvement: {improvement:.1f}%")
-    print(f"  Total iterations: {len(iterations)}")
+    # Extract results
+    model = pipeline_results.model
+    df_new = pipeline_results.df_new
+    biomass_reaction = pipeline_results.biomass_reaction
+    enzyme_upper_bound = pipeline_results.enzyme_upper_bound
+    optimal_ngam = pipeline_results.optimal_ngam
+    optimal_gam = pipeline_results.optimal_gam
 
-    # Show biomass progression
-    if len(biomasses) > 1:
-        print("\n  Biomass progression:")
-        step = max(1, len(biomasses) // 10)  # Show up to 10 checkpoints
-        for i in range(0, len(biomasses), step):
-            if i == 0:
-                print(f"    Iter {iterations[i]:3d}: {biomasses[i]:.6f}")
-            else:
-                if biomasses[i-step] != 0:
-                    change_pct = (biomasses[i] - biomasses[i-step]) / biomasses[i-step] * 100 if i >= step else 0
-                else:
-                    change_pct = 0.0  # Avoid division by zero
-                print(f"    Iter {iterations[i]:3d}: {biomasses[i]:.6f} ({change_pct:+.2f}%)")
-        if len(biomasses) - 1 not in range(0, len(biomasses), step):
-            idx = len(biomasses) - 1
-            if biomasses[idx-1] != 0:
-                change_pct = (biomasses[idx] - biomasses[idx-1]) / biomasses[idx-1] * 100
-            else:
-                change_pct = 0.0  # Avoid division by zero
-            print(f"    Iter {iterations[idx]:3d}: {biomasses[idx]:.6f} ({change_pct:+.2f}%)")
-    print("\n  Top 10 enzymes by mass contribution:")
-    print(top_targets[['Reactions', 'Single_gene', 'enzyme_mass']].head(10))
-
-    # Merge kcat_dict into df_new
-    df_new_path = os.path.join(tuning_results_dir, "df_new.csv")
-    df_new.to_csv(df_new_path, index=False)
-    kcat_dict_path = os.path.join(tuning_results_dir, "kcat_dict.csv")
-    kcat_dict_df = pd.read_csv(kcat_dict_path)
-    if 'reaction_gene' not in kcat_dict_df.columns:
-        kcat_dict_df.columns = ['reaction_gene', 'kcat_value']
-    df_new['reaction_gene'] = df_new['Reactions'].astype(str) + '_' + df_new['Single_gene'].astype(str)
-    df_new = df_new.merge(kcat_dict_df, on='reaction_gene', how='left')
-    df_new.rename(columns={'kcat_value': 'kcat_tuned'}, inplace=True)
-    final_info_path = os.path.join(tuning_results_dir, "final_model_info.csv")
-    df_new.to_csv(final_info_path, index=False)
-    print(f"\n  Saved merged DataFrame to: {final_info_path}")
-
-    # Visualize kcat changes from initial to post-annealing
-    print("\n  Generating kcat comparison plot...")
-    kcat_comparison_plot_path = os.path.join(tuning_results_dir, "kcat_comparison_initial_vs_tuned.png")
-    try:
-        plot_kcat_annealing_comparison(
-            initial_df=constraint_data,
-            tuned_df=df_new,
-            output_path=kcat_comparison_plot_path,
-            model_name=model_name,
-            show=False
-        )
-    except Exception as e:
-        print(f"  Warning: Could not generate kcat comparison plot: {e}")
-
-    # === Step 6: Optional analyses ===
-    # Track optimal maintenance parameters if sweep is run
-    optimal_ngam = None
-    optimal_gam = None
-
-    if enable_maintenance_sweep:
-        print("\n=== Step 6a: Maintenance Parameters Sweep ===")
-        maintenance_config = config.get('maintenance_sweep', {})
-        ngam_range = maintenance_config.get('ngam_range', None)
-        gam_range = maintenance_config.get('gam_range', None)
-
-        print(f"  Configuration:")
-        print(f"    - NGAM range: {ngam_range if ngam_range else 'default'}")
-        print(f"    - GAM range: {gam_range if gam_range else 'constant'}")
-        print(f"    - NGAM reaction: {ngam_rxn_id}")
-
-        maintenance_results = sweep_maintenance_parameters(
-            model=model,
-            processed_data=df_new,  # Use tuned parameters
-            biomass_reaction=biomass_reaction,
-            ngam_rxn_id=ngam_rxn_id,
-            ngam_range=ngam_range,
-            gam_range=gam_range,
-            enzyme_upper_bound=enzyme_upper_bound,
-            output_dir=tuning_results_dir,
-            medium=medium,
-            medium_upper_bound=medium_upper_bound,
-            biomass_goal=biomass_goal,  # Use same goal as simulated annealing
-            verbose=maintenance_config.get('verbose', False)
-        )
-        print(f"  Maintenance sweep completed: {len(maintenance_results)} parameter combinations tested")
-
-        # Get optimal parameters from sweep
-        # If biomass_goal is specified, find parameters closest to goal
-        # Otherwise, find parameters with maximum biomass
-        if len(maintenance_results) > 0 and maintenance_results['biomass'].max() > 0:
-            if biomass_goal is not None:
-                # Find the combination closest to the biomass goal
-                maintenance_results['distance_to_goal'] = abs(maintenance_results['biomass'] - biomass_goal)
-                best_idx = maintenance_results['distance_to_goal'].idxmin()
-                selection_method = f"closest to goal ({biomass_goal:.4f})"
-            else:
-                # Find the combination with maximum biomass
-                best_idx = maintenance_results['biomass'].idxmax()
-                selection_method = "maximum biomass"
-
-            optimal_ngam = float(maintenance_results.loc[best_idx, 'ngam'])
-            optimal_gam = float(maintenance_results.loc[best_idx, 'gam'])
-            optimal_biomass = float(maintenance_results.loc[best_idx, 'biomass'])
-
-            print(f"\n  Optimal maintenance parameters found ({selection_method}):")
-            print(f"    - NGAM: {optimal_ngam:.2f} mmol/gDW/h")
-            print(f"    - GAM: {optimal_gam:.2f} mmol ATP/gDW")
-            print(f"    - Biomass: {optimal_biomass:.4f}")
-            if biomass_goal is not None:
-                deviation = abs(optimal_biomass - biomass_goal)
-                print(f"    - Deviation from goal: {deviation:.4f}")
-            print(f"  These parameters will be applied to the final model and FVA")
-
-            # Create model with optimal maintenance parameters
-            from copy import deepcopy
-            model_optimal = deepcopy(model)
-
-            # Apply optimal NGAM
-            try:
-                ngam_rxn = model_optimal.reactions.get_by_id(ngam_rxn_id)
-                ngam_rxn.lower_bound = optimal_ngam
-            except KeyError:
-                print(f"    Warning: NGAM reaction '{ngam_rxn_id}' not found")
-
-            # Apply optimal GAM
-            try:
-                biomass_rxn = model_optimal.reactions.get_by_id(biomass_reaction)
-                atp_met_ids = ['atp_c', 'ATP_c', 'cpd00002_c0']
-
-                current_gam = None
-                atp_met = None
-                for met_id in atp_met_ids:
-                    try:
-                        met = model_optimal.metabolites.get_by_id(met_id)
-                        if met in biomass_rxn.metabolites:
-                            current_gam = abs(biomass_rxn.metabolites[met])
-                            atp_met = met
-                            break
-                    except KeyError:
-                        continue
-
-                if current_gam and atp_met:
-                    scale = optimal_gam / current_gam
-                    current_mets = biomass_rxn.metabolites.copy()
-
-                    met_mappings = {
-                        'h2o': ['h2o_c', 'H2O_c', 'cpd00001_c0'],
-                        'adp': ['adp_c', 'ADP_c', 'cpd00008_c0'],
-                        'pi': ['pi_c', 'Pi_c', 'cpd00009_c0'],
-                        'h': ['h_c', 'H_c', 'cpd00067_c0']
-                    }
-
-                    mets_to_scale = [atp_met]
-                    for met_type, possible_ids in met_mappings.items():
-                        for met_id in possible_ids:
-                            try:
-                                met = model_optimal.metabolites.get_by_id(met_id)
-                                if met in current_mets:
-                                    mets_to_scale.append(met)
-                                    break
-                            except KeyError:
-                                continue
-
-                    for met in mets_to_scale:
-                        old_coef = current_mets[met]
-                        biomass_rxn.add_metabolites({met: old_coef * (scale - 1.0)}, combine=True)
-            except KeyError:
-                print(f"    Warning: Biomass reaction '{biomass_reaction}' not found")
-
-            # Run separate FVA with optimal parameters if FVA is enabled
-            if enable_fva:
-                print(f"\n  Running separate FVA with optimal maintenance parameters...")
-                fva_config = config.get('fva', {})
-                run_fva_analysis(model_optimal, df_new, biomass_reaction, enzyme_upper_bound,
-                               tuning_results_dir, f"{model_name}_optimal_maintenance", fva_config, og_model=og_model)
-
-    if enable_fva:
-        fva_config = config.get('fva', {})
-        # Use model with optimal maintenance parameters if available, otherwise use base model
-        fva_model = model_optimal if optimal_ngam is not None else model
-
-        if optimal_ngam is not None:
-            print("\n=== Step 6b: Running FVA with optimal maintenance parameters ===")
-        else:
-            print("\n=== Step 6b: Running FVA ===")
-
-        run_fva_analysis(fva_model, df_new, biomass_reaction, enzyme_upper_bound,
-                        tuning_results_dir, model_name, fva_config, og_model=og_model)
-
-        run_fva_analysis(model, processed_data, biomass_reaction, enzyme_upper_bound,
-                        tuning_results_dir, f"{model_name}_pre_tuning", fva_config, og_model=og_model)
-
+    # Load original model for Biolog validation if needed
     if enable_biolog:
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        data_dir = os.path.join(project_root, "data")
+        raw_data_dir = os.path.join(data_dir, "raw")
+        model_path = os.path.join(raw_data_dir, f"{model_name}.xml")
+        og_model = load_model(model_path)
+        og_model.solver = solver_name  # Set solver before any operations
+        processed_data = pipeline_results.processed_df
+
         biolog_config = config.get('biolog_validation', {})
         run_biolog_validation(model, processed_data, biomass_reaction, enzyme_upper_bound,
                              biolog_config, tuning_results_dir, solver_name)
@@ -1237,7 +926,14 @@ def main():
     # === Step 7: Save Final Model ===
     print("\n=== Step 7: Saving final model ===")
 
-    model_output_dir = os.path.join(project_root, "models")
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+    # Use custom subdirectory if specified in config
+    if results_subdir:
+        model_output_dir = os.path.join(project_root, "models", results_subdir)
+    else:
+        model_output_dir = os.path.join(project_root, "models")
+
     os.makedirs(model_output_dir, exist_ok=True)
     model_output_path = os.path.join(model_output_dir, f"{run_id}.xml")
 
@@ -1324,15 +1020,29 @@ def main():
     print(f"  Final GEM saved to: {model_output_path}")
 
     # Save model configuration summary
+    # Read biomass values from saved simulated annealing results
+    sa_results_path = os.path.join(tuning_results_dir, "simulated_annealing_results.csv")
+    initial_biomass = None
+    final_biomass = None
+    improvement_percent = None
+    iterations_count = None
+    if os.path.exists(sa_results_path):
+        sa_df = pd.read_csv(sa_results_path)
+        if len(sa_df) > 0:
+            initial_biomass = float(sa_df['biomass'].iloc[0])
+            final_biomass = float(sa_df['biomass'].iloc[-1])
+            improvement_percent = (final_biomass - initial_biomass) / initial_biomass * 100 if initial_biomass > 0 else 0
+            iterations_count = len(sa_df)
+
     config_summary = {
         'run_id': run_id,
         'model_name': model_name,
         'organism': organism,
         'enzyme_upper_bound': float(enzyme_upper_bound),
-        'initial_biomass': float(biomasses[0]) if biomasses else None,
-        'final_biomass': float(biomasses[-1]) if biomasses else None,
-        'improvement_percent': float(improvement),
-        'iterations': int(len(iterations)) if iterations else 0,
+        'initial_biomass': initial_biomass,
+        'final_biomass': final_biomass,
+        'improvement_percent': improvement_percent,
+        'iterations': iterations_count,
         'optimal_ngam': float(optimal_ngam) if optimal_ngam is not None else None,
         'optimal_gam': float(optimal_gam) if optimal_gam is not None else None,
         'ngam_rxn_id': ngam_rxn_id,
@@ -1349,19 +1059,36 @@ def main():
     print("="*70)
     print(f"Run ID: {run_id}")
     print(f"Model: {model_name} ({model_type})")
-    print(f"Initial biomass (enzyme-constrained): {biomasses[0]:.4f}")
-    print(f"Post-annealing biomass: {biomasses[-1]:.4f}")
-    print(f"Annealing improvement: {improvement:.1f}%")
-    print(f"Annealing iterations: {len(iterations)}")
+
+    # Read biomass progression from saved files
+    sa_results_path = os.path.join(tuning_results_dir, "simulated_annealing_results.csv")
+    if os.path.exists(sa_results_path):
+        sa_df = pd.read_csv(sa_results_path)
+        initial_biomass = float(sa_df['biomass'].iloc[0])
+        final_biomass = float(sa_df['biomass'].iloc[-1])
+        annealing_improvement = (final_biomass - initial_biomass) / initial_biomass * 100 if initial_biomass > 0 else 0
+        print(f"Initial biomass (enzyme-constrained): {initial_biomass:.4f}")
+        print(f"Post-annealing biomass: {final_biomass:.4f}")
+        print(f"Annealing improvement: {annealing_improvement:.1f}%")
+        print(f"Annealing iterations: {len(sa_df)}")
+
     if optimal_ngam is not None:
         print(f"\nOptimal maintenance parameters (applied to final model):")
         print(f"  NGAM: {optimal_ngam:.2f} mmol/gDW/h")
         print(f"  GAM: {optimal_gam:.2f} mmol ATP/gDW")
-        print(f"  Final biomass with optimal maintenance: {optimal_biomass:.4f}")
-        total_improvement = (optimal_biomass - biomasses[0]) / biomasses[0] * 100 if biomasses[0] > 0 else 0
-        print(f"  Total improvement (annealing + maintenance): {total_improvement:.1f}%")
-    else:
-        print(f"\nFinal biomass: {biomasses[-1]:.4f}")
+
+        # Read optimal biomass from maintenance sweep results
+        maint_results_path = os.path.join(tuning_results_dir, "maintenance_sweep_results.csv")
+        if os.path.exists(maint_results_path):
+            maint_df = pd.read_csv(maint_results_path)
+            maint_df['distance_to_goal'] = abs(maint_df['biomass'] - maint_df['biomass'].max())
+            best_row = maint_df.loc[maint_df['distance_to_goal'].idxmin()]
+            optimal_biomass = float(best_row['biomass'])
+            print(f"  Final biomass with optimal maintenance: {optimal_biomass:.4f}")
+            if os.path.exists(sa_results_path):
+                total_improvement = (optimal_biomass - initial_biomass) / initial_biomass * 100 if initial_biomass > 0 else 0
+                print(f"  Total improvement (annealing + maintenance): {total_improvement:.1f}%")
+
     print(f"\nResults directory: {tuning_results_dir}")
     print(f"Final model: {model_output_path}")
     print("="*70)

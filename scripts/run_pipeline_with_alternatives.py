@@ -524,7 +524,7 @@ def run_multi_solution_optimization(model,
         complexes_off=False,
         output_dir=None,
         save_results=False,
-        verbose=False,
+        verbose=True,  # Enable verbose to see solution pool diagnostics
         solver_name=solver_name,
         medium=medium,
         medium_upper_bound=medium_upper_bound,
@@ -707,45 +707,130 @@ def main():
     # === Step 4a: COBRApy Multiple Solutions (No Constraints) ===
     print("\n=== Step 4a: Generating COBRApy Solutions (No Enzyme Constraints) ===")
     
+    # Load original reversible model for COBRApy (not the irreversible one used by kinGEMs)
+    print("  Loading original (reversible) model for COBRApy analysis...")
+    cobrapy_model = cobra.io.read_sbml_model(model_path)
+    
+    # Apply same medium constraints to COBRApy model
+    if medium is not None:
+        for rxn_id, flux_value in medium.items():
+            try:
+                rxn = cobrapy_model.reactions.get_by_id(rxn_id)
+                rxn.lower_bound = flux_value
+                if medium_upper_bound:
+                    rxn.upper_bound = flux_value
+            except KeyError:
+                pass  # Reaction might not exist in original model
+    
     # For COBRApy, we can't use the enzyme-constrained function
-    # Instead, we'll use Gurobi directly with cobra model
+    # Instead, we'll use Gurobi directly with the original cobra model
     try:
         from cobra.core import get_solution
-        model.solver = 'gurobi'
-        model.solver.problem.Params.PoolSearchMode = 2
-        model.solver.problem.Params.PoolSolutions = args.num_solutions
-        model.solver.problem.Params.PoolGap = args.pool_gap
+        cobrapy_model.solver = 'gurobi'
         
-        solution = model.optimize()
+        # First, verify the model is feasible without solution pool
+        solution = cobrapy_model.optimize()
         
-        # Extract solutions from pool
+        if solution.status != 'optimal':
+            raise ValueError(f"Model not optimal: {solution.status}")
+        
+        print(f"  Model is feasible. Objective: {solution.objective_value:.4f}")
+        
+        # Configure solution pool BEFORE optimization
+        print(f"  Configuring solution pool: PoolSearchMode=2, PoolSolutions={args.num_solutions}, PoolGap={args.pool_gap}")
+        gurobi_model = cobrapy_model.solver.problem
+        gurobi_model.setParam('PoolSearchMode', 2)  # 2 = systematic search
+        gurobi_model.setParam('PoolSolutions', args.num_solutions)
+        gurobi_model.setParam('PoolGap', args.pool_gap)
+        
+        # Re-optimize to populate solution pool
+        print(f"  Re-optimizing with solution pool settings...")
+        cobrapy_model.solver.optimize()
+        
+        # Check how many solutions were found
+        num_solutions_found = gurobi_model.SolCount
+        print(f"  ✓ Gurobi SolCount: {num_solutions_found}")
+        
+        # Also check if the model is LP or MIP (solution pools work better for MIP)
+        is_mip = gurobi_model.IsMIP
+        print(f"  Model type: {'MIP' if is_mip else 'LP'}")
+        if not is_mip:
+            print(f"  ⚠️  NOTE: Model is LP (continuous). Solution pool may only find 1 solution.")
+            print(f"  For LP models with degeneracy, consider using Flux Variability Analysis (FVA)")
+            print(f"  or sampling methods to explore the solution space.")
+        
+        # Extract solutions from pool using Gurobi's Xn attribute
         cobrapy_solutions = []
-        num_solutions_found = model.solver.problem.SolCount
-        print(f"  ✓ Found {num_solutions_found} COBRApy solutions")
+        gurobi_model = cobrapy_model.solver.problem
+        num_solutions_found = gurobi_model.SolCount
+        print(f"  ✓ Found {num_solutions_found} COBRApy solutions in pool")
         
-        for i in range(min(num_solutions_found, args.num_solutions)):
-            model.solver.problem.params.SolutionNumber = i
-            obj_val = model.solver.problem.PoolObjVal
+        if num_solutions_found == 0:
+            print(f"  ⚠️  No solutions in pool - using ACHR flux sampling as alternative")
+            print(f"  Running ACHR (Artificial Centering Hit-and-Run) sampling...")
             
-            # Get flux values
-            fluxes = {}
-            for rxn in model.reactions:
-                fluxes[rxn.id] = rxn.flux
-            
-            # Create dataframe matching kinGEMs format
-            records = [('flux', rxn_id, flux, None) for rxn_id, flux in fluxes.items()]
-            df_fba = pd.DataFrame(records, columns=['Variable', 'Index', 'Value', 'Bounds'])
-            
-            cobrapy_solutions.append((obj_val, df_fba))
+            # Use ACHR to sample the solution space
+            # First constrain to near-optimal region
+            with cobrapy_model:
+                # Add constraint to stay within pool gap of optimal
+                min_objective = solution.objective_value * (1.0 - args.pool_gap)
+                cobrapy_model.reactions.get_by_id(cobrapy_model.objective.direction).lower_bound = min_objective
+                
+                print(f"  Sampling within {args.pool_gap*100}% of optimal ({min_objective:.6f} ≤ objective ≤ {solution.objective_value:.6f})")
+                
+                # Generate samples using ACHR
+                # thinning=100 means take every 100th sample to reduce correlation
+                sampler = cobra.sampling.ACHRSampler(
+                    cobrapy_model,
+                    thinning=100,
+                    seed=42
+                )
+                
+                # Generate samples (returns DataFrame with reactions as columns)
+                samples_df = sampler.sample(args.num_solutions)
+                
+                print(f"  ✓ Generated {len(samples_df)} ACHR samples")
+                
+                # Convert samples to solution format
+                for sample_idx in samples_df.index:
+                    fluxes = samples_df.loc[sample_idx].to_dict()
+                    
+                    # Calculate objective value for this sample
+                    obj_val = sum(
+                        coef * fluxes[rxn.id]
+                        for rxn, coef in cobrapy_model.objective.items()
+                    )
+                    
+                    records = [('flux', rxn_id, flux, None) for rxn_id, flux in fluxes.items()]
+                    df_fba = pd.DataFrame(records, columns=['Variable', 'Index', 'Value', 'Bounds'])
+                    cobrapy_solutions.append((obj_val, df_fba))
+        else:
+            for i in range(min(num_solutions_found, args.num_solutions)):
+                gurobi_model.params.SolutionNumber = i
+                obj_val = gurobi_model.PoolObjVal
+                
+                # Get flux values from solution pool using Xn attribute
+                fluxes = {}
+                for rxn in cobrapy_model.reactions:
+                    # Get the Gurobi variable for this reaction
+                    cobra_var = cobrapy_model.solver.variables[rxn.id]
+                    # Xn gets the value from the solution pool for SolutionNumber i
+                    fluxes[rxn.id] = cobra_var.Xn
+                
+                # Create dataframe matching kinGEMs format
+                records = [('flux', rxn_id, flux, None) for rxn_id, flux in fluxes.items()]
+                df_fba = pd.DataFrame(records, columns=['Variable', 'Index', 'Value', 'Bounds'])
+                
+                cobrapy_solutions.append((obj_val, df_fba))
+                print(f"    Solution {i+1}: objective = {obj_val:.4f}")
     
     except Exception as e:
         print(f"  ⚠️  Error generating COBRApy solutions: {e}")
-        print("  Using single optimal solution instead")
-        solution = model.optimize()
-        fluxes = {rxn.id: rxn.flux for rxn in model.reactions}
-        records = [('flux', rxn_id, flux, None) for rxn_id, flux in fluxes.items()]
-        df_fba = pd.DataFrame(records, columns=['Variable', 'Index', 'Value', 'Bounds'])
-        cobrapy_solutions = [(solution.objective_value, df_fba)]
+        print(f"  Solution status: {solution.status if 'solution' in locals() else 'unknown'}")
+        print("  This may be due to model infeasibility or solver issues.")
+        print("  Skipping COBRApy solution generation - will only analyze kinGEMs models.")
+        # Create empty solution list - we'll skip comparison with COBRApy
+        cobrapy_solutions = []
     
     # === Step 4b: kinGEMs Pre-Tuning Multiple Solutions ===
     print("\n=== Step 4b: Generating kinGEMs Pre-Tuning Solutions ===")
@@ -954,9 +1039,13 @@ def main():
     analyzer = SolutionSpaceAnalyzer(results_dir)
     
     # Analyze flux distributions
-    cobrapy_stats = analyzer.analyze_flux_distributions(
-        cobrapy_solutions, "COBRApy", reactions=focus_reactions
-    )
+    if len(cobrapy_solutions) > 0:
+        cobrapy_stats = analyzer.analyze_flux_distributions(
+            cobrapy_solutions, "COBRApy", reactions=focus_reactions
+        )
+    else:
+        print("\n  ⚠️  Skipping COBRApy analysis (no solutions available)")
+        cobrapy_stats = None
     
     kingems_pre_stats = analyzer.analyze_flux_distributions(
         kingems_pre_solutions, "kinGEMs Pre-Tuning", reactions=focus_reactions
@@ -967,35 +1056,68 @@ def main():
     )
     
     # Compare solution spaces
-    comparison_df = analyzer.compare_solution_spaces(
-        cobrapy_stats, kingems_pre_stats, kingems_post_stats
-    )
+    if cobrapy_stats is not None:
+        comparison_df = analyzer.compare_solution_spaces(
+            cobrapy_stats, kingems_pre_stats, kingems_post_stats
+        )
+    else:
+        print("\n  ⚠️  Skipping full comparison (no COBRApy baseline)")
+        # Create partial comparison between pre and post tuning
+        comparison_df = pd.DataFrame({'Reaction': kingems_pre_stats['Reaction']})
+        for col in ['Mean', 'Std', 'Range', 'Entropy']:
+            comparison_df[f'{col}_Pre_Tuning'] = kingems_pre_stats[col]
+            comparison_df[f'{col}_Post_Tuning'] = kingems_post_stats[col]
+        
+        comparison_df['Std_Reduction_Post'] = (
+            (comparison_df['Std_Pre_Tuning'] - comparison_df['Std_Post_Tuning']) / 
+            (comparison_df['Std_Pre_Tuning'] + 1e-10)
+        )
+        
+        comparison_path = os.path.join(analyzer.output_dir, "solution_space_comparison_partial.csv")
+        comparison_df.to_csv(comparison_path, index=False)
     
     # === Step 10: Generate Visualizations ===
     print("\n=== Step 10: Generating Visualizations ===")
     
     # Plot objective distributions
-    analyzer.plot_objective_distributions(
-        cobrapy_solutions, kingems_pre_solutions, kingems_post_solutions, model_name
-    )
+    if len(cobrapy_solutions) > 0:
+        analyzer.plot_objective_distributions(
+            cobrapy_solutions, kingems_pre_solutions, kingems_post_solutions, model_name
+        )
+    else:
+        print("  ⚠️  Skipping objective distribution plot (no COBRApy solutions)")
     
     # Plot solution space metrics
-    analyzer.plot_solution_space_metrics(comparison_df, model_name)
+    if cobrapy_stats is not None:
+        analyzer.plot_solution_space_metrics(comparison_df, model_name)
+    else:
+        print("  ⚠️  Skipping solution space metrics plot (no COBRApy baseline)")
     
     # Plot flux distributions for specific reactions
     if focus_reactions:
-        analyzer.plot_flux_distributions(
-            cobrapy_solutions, kingems_pre_solutions, kingems_post_solutions,
-            focus_reactions, model_name
-        )
+        if len(cobrapy_solutions) > 0:
+            analyzer.plot_flux_distributions(
+                cobrapy_solutions, kingems_pre_solutions, kingems_post_solutions,
+                focus_reactions, model_name
+            )
+        else:
+            print("  ⚠️  Skipping flux distribution plots (no COBRApy solutions)")
     else:
-        # Use top 10 most variable reactions from COBRApy
-        top_variable_rxns = cobrapy_stats.nlargest(10, 'Std')['Reaction'].tolist()
+        # Use top 10 most variable reactions
+        if len(cobrapy_solutions) > 0:
+            top_variable_rxns = cobrapy_stats.nlargest(10, 'Std')['Reaction'].tolist()
+        else:
+            top_variable_rxns = kingems_pre_stats.nlargest(10, 'Std')['Reaction'].tolist()
+        
         print(f"\n  Generating plots for top 10 most variable reactions")
-        analyzer.plot_flux_distributions(
-            cobrapy_solutions, kingems_pre_solutions, kingems_post_solutions,
-            top_variable_rxns, model_name
-        )
+        
+        if len(cobrapy_solutions) > 0:
+            analyzer.plot_flux_distributions(
+                cobrapy_solutions, kingems_pre_solutions, kingems_post_solutions,
+                top_variable_rxns, model_name
+            )
+        else:
+            print("  ⚠️  Skipping flux distribution plots (no COBRApy solutions)")
     
     # === Summary ===
     print("\n" + "="*80)
@@ -1015,7 +1137,10 @@ def main():
     print(f"  kinGEMs pre-tuning:                    {len(kingems_pre_solutions)}")
     print(f"  kinGEMs post-tuning (w/ maintenance):  {len(kingems_post_solutions)}")
     print(f"\nAverage Objective Values:")
-    print(f"  COBRApy:      {np.mean([obj for obj, _ in cobrapy_solutions]):.4f} ± {np.std([obj for obj, _ in cobrapy_solutions]):.4f}")
+    if len(cobrapy_solutions) > 0:
+        print(f"  COBRApy:      {np.mean([obj for obj, _ in cobrapy_solutions]):.4f} ± {np.std([obj for obj, _ in cobrapy_solutions]):.4f}")
+    else:
+        print(f"  COBRApy:      N/A (no solutions generated)")
     print(f"  Pre-tuning:   {np.mean([obj for obj, _ in kingems_pre_solutions]):.4f} ± {np.std([obj for obj, _ in kingems_pre_solutions]):.4f}")
     print(f"  Post-tuning:  {np.mean([obj for obj, _ in kingems_post_solutions]):.4f} ± {np.std([obj for obj, _ in kingems_post_solutions]):.4f}")
     

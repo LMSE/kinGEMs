@@ -357,16 +357,16 @@ def main():
         # ===================================================================
         optimal_ngam = None
         optimal_gam = None
-        
+
         if not args.skip_maintenance_sweep:
             print("\n=== Running Maintenance Parameter Sweep ===")
             print(f"  Target: Match baseline biomass ({biomass_values['Level 1: Baseline GEM']:.4f})")
-            
+
             maintenance_config = config.get('maintenance_sweep', {})
             ngam_rxn_id = config.get('ngam_rxn_id', 'ATPM')
             ngam_range = maintenance_config.get('ngam_range', None)
             gam_range = maintenance_config.get('gam_range', None)
-            
+
             maintenance_results = sweep_maintenance_parameters(
                 model=model,
                 processed_data=tuned_df,  # Use tuned parameters
@@ -378,22 +378,23 @@ def main():
                 output_dir=results_dir,
                 medium=None,
                 medium_upper_bound=False,
+                biomass_goal=biomass_values['Level 1: Baseline GEM'],  # Use baseline biomass as target
                 verbose=False
             )
-            
+
             maintenance_results.to_csv(os.path.join(results_dir, 'maintenance_sweep_results.csv'), index=False)
             print(f"  Sweep complete: {len(maintenance_results)} combinations tested")
-            
+
             # Find parameters closest to baseline biomass
             baseline_biomass = biomass_values['Level 1: Baseline GEM']
             if len(maintenance_results) > 0 and maintenance_results['biomass'].max() > 0:
                 maintenance_results['distance_to_baseline'] = abs(maintenance_results['biomass'] - baseline_biomass)
                 best_idx = maintenance_results['distance_to_baseline'].idxmin()
-                
+
                 optimal_ngam = float(maintenance_results.loc[best_idx, 'ngam'])
                 optimal_gam = float(maintenance_results.loc[best_idx, 'gam'])
                 optimal_biomass = float(maintenance_results.loc[best_idx, 'biomass'])
-                
+
                 print(f"\n  Optimal maintenance parameters (closest to baseline):")
                 print(f"    - NGAM: {optimal_ngam:.2f} mmol/gDW/h")
                 print(f"    - GAM: {optimal_gam:.2f} mmol ATP/gDW")

@@ -58,7 +58,7 @@ Usage to regenerate analysis on existing results folder:
     (example command - specify experimental data file)
     python scripts/run_fluxomics_validation.py --regenerate_results \
         results/fluxomics_validation/iML1515_GEM_20260126_6698 \
-        data/raw/crown_fluxomics_final.csv
+        data/experimental/crown_fluxomics_final.csv
 
 Arguments:
     config_file: Path to JSON configuration file
@@ -101,6 +101,7 @@ from kinGEMs.fluxomics_validation import (
     calculate_range_precision_ratio,
     calculate_normalized_euclidean_dist,
     calculate_jaccard_index,
+    calculate_mean_to_mean_distance,
 )
 from kinGEMs.plots import (
     plot_fva_mfa_comparison,
@@ -230,6 +231,7 @@ def run_fluxomics_analysis(
         range_precision_ratio = calculate_range_precision_ratio(comparison_df)
         normalized_euclidean_dist = calculate_normalized_euclidean_dist(comparison_df)
         jaccard_index, jaccard_df, zero_overlaps = calculate_jaccard_index(comparison_df)
+        mean_to_mean_dist = calculate_mean_to_mean_distance(comparison_df)
         n_total_list.append(len(jaccard_df))
 
         # Save detailed results
@@ -246,6 +248,7 @@ def run_fluxomics_analysis(
             "consistency_score": consistency_score,
             "range_precision_ratio_median": range_precision_ratio.median(),
             "normalized_euclidean_dist": normalized_euclidean_dist,
+            "mean_to_mean_distance": mean_to_mean_dist,
             "jaccard_index": jaccard_index,
             "zero_overlaps": zero_overlaps
         })
@@ -285,6 +288,17 @@ def run_fluxomics_analysis(
         show=show_plots
     )
     logger.info("Saved Jaccard index (overlapping only) plot: %s", jaccard_overlap_plot_path)
+
+    # Overlapping-only Jaccard plot (coverage-normalized)
+    jaccard_overlap_normalized_plot_path = os.path.join(analysis_dir, "jaccard_index_comparison_overlapping_normalized.png")
+    plot_jaccard_index_comparison_overlapping(
+        jaccard_dfs=jaccard_dfs,
+        model_names=model_names,
+        output_path=jaccard_overlap_normalized_plot_path,
+        show=show_plots,
+        normalize_by_coverage=True
+    )
+    logger.info("Saved Jaccard index (overlapping, coverage-normalized) plot: %s", jaccard_overlap_normalized_plot_path)
 
     # --- Stacked Jaccard plot (boxplot + jitter) ---
     # Each jaccard_df should contain per-reaction Jaccard values.
@@ -340,7 +354,7 @@ def run_fluxomics_analysis(
     )
     logger.info("Saved FVA vs MFA comparison plot: %s", fva_plot_path)
 
-    rxn_ids=["EX_ac_e", "PPC", "MALS"]
+    rxn_ids=["AKGDH", "EX_ac_e", "CS"]
     zoom_plot_path = os.path.join(analysis_dir, f"fva_mfa_comparison_zoom_{rxn_ids[0]}_{rxn_ids[1]}_{rxn_ids[2]}.png")
     plot_fva_mfa_comparison_zoom(
         models_data=comparison_dfs,  # IMPORTANT: use full comparison_dfs (has MFA columns)
@@ -388,7 +402,7 @@ def main() -> None:
         analysis_dir = os.path.join(results_dir, "fluxomics_analysis")
 
         # Default experimental data file (can be overridden)
-        experimental_data_file = os.path.join(project_root, "data", "raw", "crown_fluxomics_final.csv")
+        experimental_data_file = os.path.join(project_root, "data", "experimental", "crown_fluxomics_final.csv")
         if len(sys.argv) > 3:
             experimental_data_file = sys.argv[3]
 
@@ -399,10 +413,11 @@ def main() -> None:
         fva_specs = []
         if os.path.isdir(pipeline_dir):
             # Look for FVA files in pipeline_results
+            # Order matters: check more specific patterns first to avoid false matches
             fva_patterns = [
-                ("COBRA FVA", "_cobra_fva_results.csv"),
+                ("Baseline GEM", "_pre_tuning_cobra_fva_results.csv"),
                 ("kinGEMs FVA (pre-tuning)", "_pre_tuning_fva_results.csv"),
-                ("kinGEMs FVA", "_fva_results.csv"),  # Must come after pre_tuning to avoid matching it
+                ("kinGEMs FVA", "_fva_results.csv"),
             ]
 
             for filename in os.listdir(pipeline_dir):
@@ -410,10 +425,11 @@ def main() -> None:
                     filepath = os.path.join(pipeline_dir, filename)
                     for label, pattern in fva_patterns:
                         if pattern in filename:
-                            # Avoid duplicate matches (e.g., pre_tuning should not match regular fva)
-                            if pattern == "_fva_results.csv" and "_pre_tuning_" in filename:
+                            # Avoid duplicate matches
+                            if pattern == "_fva_results.csv" and ("_pre_tuning_" in filename or "_cobra_" in filename):
                                 continue
-                            if pattern == "_fva_results.csv" and "_cobra_" in filename:
+                            # Skip post-tuning COBRA FVA (only use pre-tuning baseline)
+                            if "_cobra_fva_results.csv" in filename and "_pre_tuning_" not in filename:
                                 continue
                             fva_specs.append(FVAResultSpec(label=label, path=filepath))
                             break

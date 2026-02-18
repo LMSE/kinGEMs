@@ -37,12 +37,64 @@ SEED_ALIASES = EXTERNAL_DATA_DIR / "Unique_ModelSEED_Compound_Aliases.txt"
 
 # Define taxonomy IDs for sequence retrieval
 TAXONOMY_IDS = {
-    'E coli': 83333,  # Taxonomy ID for E. coli K-12
-    'Yeast': 4932,    # Taxonomy ID for S. cerevisiae
-    'S elongatus': 1140,  # Taxonomy ID for S. elongatus PCC 7942: https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=1140
-    'P putida': 160488, # Taxonomy ID for P. putida KT2440: https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=160488
-    'B ovatus': 28116 , # Taxonomy ID for B. ovatus: https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?mode=Info&id=28116
-      # Add more organisms as needed
+    # Bacteria - Proteobacteria - Enterobacteriaceae
+    'E coli': 83333,  # Escherichia coli K-12 MG1655
+    'Salmonella': 99287,  # Salmonella enterica subsp. enterica serovar Typhimurium str. LT2
+    'Klebsiella': 272620,  # Klebsiella pneumoniae subsp. pneumoniae MGH 78578
+    'Yersinia': 214092,  # Yersinia pestis CO92
+    
+    # Bacteria - Proteobacteria - Other
+    'Pseudomonas': 160488,  # Pseudomonas putida KT2440
+    'Acinetobacter': 400667,  # Acinetobacter baumannii ATCC 17978
+    'Geobacter': 243231,  # Geobacter metallireducens GS-15
+    'Burkholderia': 269482,  # Burkholderia cenocepacia J2315
+    
+    # Bacteria - Firmicutes
+    'B subtilis': 224308,  # Bacillus subtilis subsp. subtilis str. 168
+    'S aureus': 93061,  # Staphylococcus aureus subsp. aureus NCTC 8325
+    'L lactis': 272623,  # Lactococcus lactis subsp. lactis Il1403
+    'Clostridium': 272563,  # Clostridioides difficile 630
+    'Clostridioides': 272563,  # Clostridioides difficile 630
+    'Thermoanaerobacter': 187420,  # Thermoanaerobacter tengcongensis MB4
+    
+    # Bacteria - Actinobacteria
+    'M tuberculosis': 83332,  # Mycobacterium tuberculosis H37Rv
+    'Streptomyces': 100226,  # Streptomyces coelicolor A3(2)
+    
+    # Bacteria - Cyanobacteria
+    'Synechococcus': 1140,  # Synechococcus elongatus PCC 7942
+    'Synechocystis': 1148,  # Synechocystis sp. PCC 6803
+    
+    # Bacteria - Other
+    'H pylori': 85962,  # Helicobacter pylori 26695
+    'Thermotoga': 243274,  # Thermotoga maritima MSB8
+    'Bacteroides': 28116,  # Bacteroides ovatus ATCC 8483
+    
+    # Archaea
+    'Methanosarcina': 188937,  # Methanosarcina barkeri str. Fusaro
+    'Methanobacterium': 145262,  # Methanobacterium sp. AL-21
+    
+    # Eukaryotes - Fungi
+    'Yeast': 4932,  # Saccharomyces cerevisiae S288C
+    
+    # Eukaryotes - Mammals
+    'Human': 9606,  # Homo sapiens
+    'Mouse': 10090,  # Mus musculus
+    'Chinese Hamster Ovary': 10029,  # Cricetulus griseus
+    
+    # Eukaryotes - Parasites
+    'T cruzi': 5693,  # Trypanosoma cruzi
+    'Leishmania': 5664,  # Leishmania major
+    'P falciparum': 36329,  # Plasmodium falciparum 3D7
+    'P berghei': 5823,  # Plasmodium berghei
+    'P chabaudi': 5825,  # Plasmodium chabaudi
+    'P knowlesi': 5850,  # Plasmodium knowlesi
+    'P vivax': 5855,  # Plasmodium vivax
+    'P cynomolgi': 5827,  # Plasmodium cynomolgi
+    
+    # Eukaryotes - Algae/Diatoms
+    'Phaeodactylum': 2850,  # Phaeodactylum tricornutum
+    'Chlamydomonas': 3055,  # Chlamydomonas reinhardtii
 }
 
 # REST datasets/endpoints to try, in order

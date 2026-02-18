@@ -716,7 +716,7 @@ def plot_annealing_progress(iterations, biomasses, output_path=None, show=False)
 
 
 def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
-                                  figsize=(14, 10), show=False, model_name=None):
+                                  figsize=(16, 10), show=False, model_name=None):
     """
     Compare initial and post-annealing kcat values with multiple visualizations.
 
@@ -786,7 +786,7 @@ def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
 
     # Create figure with subplots - add space for stats on right
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3, width_ratios=[1, 1, 0.75])
+    gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3, width_ratios=[1, 1, 0.85])
 
     # 1. Scatter plot: Initial vs Tuned
     ax1 = fig.add_subplot(gs[0, :2])
@@ -820,15 +820,15 @@ def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
         from scipy.stats import gaussian_kde
         kde_initial = gaussian_kde(log_initial_clean)
         x_range = np.linspace(log_initial_clean.min(), log_initial_clean.max(), 200)
-        ax2.fill_between(10**x_range, kde_initial(x_range), alpha=0.7, color='#ff7f0e', label='Initial kcat')
-        ax2.plot(10**x_range, kde_initial(x_range), color='#cc6600', linewidth=2)
+        ax2.fill_between(10**x_range, kde_initial(x_range), alpha=0.7, color='#8c564b', label='Initial kcat')
+        ax2.plot(10**x_range, kde_initial(x_range), color='#6a3d34', linewidth=2)
 
-    ax2.axvline(initial_median, color='red', linestyle='--', linewidth=2.5, label=f'Median: {initial_median:.1f}')
+    ax2.axvline(initial_median, color='#8c564b', linestyle='--', linewidth=2.5, label=f'Median: {initial_median:.1f}')
     ax2.set_xscale('log')
     ax2.set_xlabel('kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
     ax2.set_ylabel('Density', fontsize=FONT_SIZES['axis_label'])
     ax2.set_title('Initial kcat Distribution', fontsize=FONT_SIZES['subtitle'])
-    ax2.legend(fontsize=FONT_SIZES['legend'])
+    ax2.legend(fontsize=FONT_SIZES['legend'], loc='upper center', bbox_to_anchor=(0.35, -0.15), ncol=2)
     ax2.grid(True, alpha=0.3, axis='y')
 
     # 3. KDE: Post-annealing kcat distribution
@@ -840,15 +840,15 @@ def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
     if len(log_tuned_clean) > 1:
         kde_tuned = gaussian_kde(log_tuned_clean)
         x_range = np.linspace(log_tuned_clean.min(), log_tuned_clean.max(), 200)
-        ax3.fill_between(10**x_range, kde_tuned(x_range), alpha=0.7, color='#2ca02c', label='Post-Annealing kcat')
-        ax3.plot(10**x_range, kde_tuned(x_range), color='#1a7a1a', linewidth=2)
+        ax3.fill_between(10**x_range, kde_tuned(x_range), alpha=0.7, color='#e377c2', label='Post-Annealing kcat')
+        ax3.plot(10**x_range, kde_tuned(x_range), color='#c45ba0', linewidth=2)
 
-    ax3.axvline(tuned_median, color='red', linestyle='--', linewidth=2.5, label=f'Median: {tuned_median:.1f}')
+    ax3.axvline(tuned_median, color='#e377c2', linestyle='--', linewidth=2.5, label=f'Median: {tuned_median:.1f}')
     ax3.set_xscale('log')
     ax3.set_xlabel('kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
     ax3.set_ylabel('Density', fontsize=FONT_SIZES['axis_label'])
     ax3.set_title('Post-Annealing kcat Distribution', fontsize=FONT_SIZES['subtitle'])
-    ax3.legend(fontsize=FONT_SIZES['legend'])
+    ax3.legend(fontsize=FONT_SIZES['legend'], loc='upper center', bbox_to_anchor=(0.65, -0.15), ncol=2)
     ax3.grid(True, alpha=0.3, axis='y')
 
     # 4. Statistics panel on the right
@@ -866,9 +866,9 @@ def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
         f'Decreased:\n{n_decreased}\n({100*n_decreased/len(merged):.1f}%)'
     )
 
-    ax_stats.text(0.03, 0.5, stats_text, transform=ax_stats.transAxes,
+    ax_stats.text(0.5, 0.5, stats_text, transform=ax_stats.transAxes,
                  fontsize=FONT_SIZES['legend'], verticalalignment='center',
-                 fontweight='bold', family='monospace',
+                 horizontalalignment='center', fontweight='bold', family='monospace',
                  bbox=dict(boxstyle='round', facecolor='white', alpha=0.9,
                           edgecolor='black', linewidth=2, pad=1))
 
@@ -1097,9 +1097,62 @@ def calculate_flux_metrics(fva_df):
     return pd.Series(combined_data)
 
 
+def calculate_cumulative_fvi_auc(fvi_series, log_range=(1e-5, 1e3)):
+    """
+    Calculate the Area Under the Curve (AUC) for cumulative FVi distribution.
+
+    The AUC is computed in log-space (log10 of FVi) using the trapezoidal rule.
+    Lower AUC indicates more reactions with low variability (better constraint).
+
+    Parameters
+    ----------
+    fvi_series : pandas.Series
+        Series of FVi values for reactions
+    log_range : tuple, optional
+        Range for log-scale integration (min_fvi, max_fvi)
+
+    Returns
+    -------
+    float
+        AUC value in log-space
+    """
+    # Filter out zero and very small values
+    fvi_nonzero = fvi_series[fvi_series > 1e-15].values
+
+    if len(fvi_nonzero) == 0:
+        return np.nan
+
+    # Sort FVi values
+    fvi_sorted = np.sort(fvi_nonzero)
+    cumulative = np.arange(1, len(fvi_sorted) + 1) / len(fvi_sorted)
+
+    # Take log10 of FVi values for integration
+    log_fvi = np.log10(fvi_sorted)
+
+    # Clip to specified range for consistent comparison
+    log_min, log_max = np.log10(log_range[0]), np.log10(log_range[1])
+
+    # Interpolate cumulative distribution to get values at consistent x-points
+    # Create uniform grid in log space
+    n_points = 1000
+    log_grid = np.linspace(log_min, log_max, n_points)
+
+    # Interpolate cumulative probability at grid points
+    cumulative_interp = np.interp(log_grid, log_fvi, cumulative, left=0, right=1)
+
+    # Calculate AUC using trapezoidal rule
+    auc = np.trapz(cumulative_interp, log_grid)
+
+    # Normalize by the total possible area
+    total_area = log_max - log_min
+    normalized_auc = auc / total_area
+
+    return normalized_auc
+
+
 def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
                                 output_path=None, figsize=(12, 8), show=False,
-                                legend_position='upper left', enhanced=True):
+                                legend_position='upper left', enhanced=True, show_auc=True):
     """
     Create cumulative FVi distribution plot for FVA ablation study.
 
@@ -1125,6 +1178,8 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
         Position for the legend ('upper left', 'lower right', etc.)
     enhanced : bool, optional
         Whether to create enhanced version with bottom subplot
+    show_auc : bool, optional
+        Whether to display AUC values in the legend
 
     Returns
     -------
@@ -1141,6 +1196,7 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
     # Main plot: Cumulative distribution of FVi
     all_fvi_values = []
     fvi_stats = {}
+    auc_values = {}
 
     for label, fva_df in fva_results_dict.items():
         fvi = calculate_flux_metrics(fva_df)
@@ -1153,7 +1209,17 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
         fvi_sorted = np.sort(fvi_nonzero)
         cumulative = np.arange(1, len(fvi_sorted) + 1) / len(fvi_sorted)
 
-        ax1.plot(fvi_sorted, cumulative, label=label,
+        # Calculate AUC
+        auc = calculate_cumulative_fvi_auc(fvi)
+        auc_values[label] = auc
+
+        # Create label with AUC if requested
+        if show_auc and not np.isnan(auc):
+            plot_label = f"{label} (AUC={auc:.2f})"
+        else:
+            plot_label = label
+
+        ax1.plot(fvi_sorted, cumulative, label=plot_label,
                 color=FVA_LEVEL_COLORS.get(label, None), linewidth=2.5)
 
         # Store stats for bottom plot
@@ -1161,7 +1227,8 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
             fvi_stats[label] = {
                 'mean': fvi.mean(),
                 'median': fvi.median(),
-                'biomass': biomass_dict[label]
+                'biomass': biomass_dict[label],
+                'auc': auc
             }
 
     # Add horizontal reference line at cumulative probability 0.5
@@ -1195,7 +1262,7 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
         # Set up left y-axis for Median FVi
         ax2.set_ylabel('Median FVi', fontsize=FONT_SIZES['axis_label'])
         ax2.set_yscale('log')
-        ax2.set_ylim(bottom=1e-6)
+        ax2.set_ylim(bottom=1e-2)
         ax2.set_xticks(x_pos)
         ax2.set_xticklabels([label.replace('Level ', 'L').replace(': ', '\n') for label in labels],
                            rotation=45, ha='right', fontsize=FONT_SIZES['annotation'])
@@ -1516,11 +1583,15 @@ def generate_fva_ablation_summary_statistics(fva_results_dict, biomass_dict, out
         zero_flux_reactions = (fvi == 0).sum()
         high_var_reactions = (fvi > 1).sum()
 
+        # Calculate AUC for cumulative FVi distribution
+        auc = calculate_cumulative_fvi_auc(fvi)
+
         summary_data.append({
             'Level': label,
             'Biomass (1/hr)': biomass,
             'N Reactions (original)': len(fva_df),
             'N Reactions (combined)': len(fvi),
+            'AUC (Cumulative FVi)': auc,
             'Mean FVi': fvi.mean(),
             'Median FVi': fvi.median(),
             'Std FVi': fvi.std(),
@@ -2833,13 +2904,28 @@ def plot_jaccard_index_comparison_overlapping(
     jaccard_dfs: list[pd.DataFrame],
     model_names: list[str] | None = None,
     output_path: str | None = None,
-    show: bool = True
+    show: bool = True,
+    normalize_by_coverage: bool = False
 ) -> None:
     """
     Plot bar chart of mean Jaccard index for only overlapping reactions (J > 0).
     Title includes number of overlapping reactions (per model).
     Deduplicates labels AFTER mapping (keeps first).
     Auto-scales y-axis to plotted values.
+    
+    Parameters
+    ----------
+    jaccard_dfs : list[pd.DataFrame]
+        List of DataFrames with 'jaccard' column
+    model_names : list[str], optional
+        Names of models
+    output_path : str, optional
+        Path to save figure
+    show : bool
+        Whether to display the plot
+    normalize_by_coverage : bool
+        If True, normalize Jaccard by coverage (n/n_max) to account for 
+        fewer reactions having inflated scores
     """
     set_plotting_style()
 
@@ -2858,6 +2944,11 @@ def plot_jaccard_index_comparison_overlapping(
         overlapping = df[df["jaccard"] > 0]
         mean_jaccards.append(float(overlapping["jaccard"].mean()) if not overlapping.empty else 0.0)
         n_overlapping.append(int(len(overlapping)))
+
+    # Normalize by coverage if requested
+    if normalize_by_coverage:
+        max_n = max(n_overlapping) if n_overlapping else 1
+        mean_jaccards = [j * (n / max_n) for j, n in zip(mean_jaccards, n_overlapping)]
 
     model_label_map = {
         "COBRA FVA": "Baseline GEM",
@@ -2906,7 +2997,11 @@ def plot_jaccard_index_comparison_overlapping(
     fig, ax = plt.subplots(figsize=DEFAULT_FIGSIZE_SINGLE)
     bars = ax.bar(x, mean_jaccards, color=bar_colors, alpha=0.85, edgecolor="black", linewidth=1)
 
-    ax.set_ylabel("Mean Jaccard Index (overlapping only) (↑ better)", fontsize=FONT_SIZES["axis_label"])
+    ylabel = "Mean Jaccard Index (overlapping only)"
+    if normalize_by_coverage:
+        ylabel += " × Coverage"
+    ylabel += " (↑ better)"
+    ax.set_ylabel(ylabel, fontsize=FONT_SIZES["axis_label"])
     ax.grid(axis="y", linestyle="--", alpha=0.3)
 
     ax.set_xticks(x)
@@ -2923,7 +3018,12 @@ def plot_jaccard_index_comparison_overlapping(
         if all(v == n_overlapping[0] for v in n_overlapping)
         else " (n=" + ", ".join(str(v) for v in n_overlapping) + ")"
     )
-    ax.set_title(f"Mean Jaccard Index (Overlapping Only){n_str}", fontsize=FONT_SIZES["subtitle"])
+    title = "Mean Jaccard Index"
+    if normalize_by_coverage:
+        title += " (Coverage-Normalized)"
+    else:
+        title += " (Overlapping Only)"
+    ax.set_title(f"{title}{n_str}", fontsize=FONT_SIZES["subtitle"])
 
     # Annotate bars
     for bar in bars:
@@ -2947,3 +3047,4 @@ def plot_jaccard_index_comparison_overlapping(
         plt.show()
     else:
         plt.close(fig)
+

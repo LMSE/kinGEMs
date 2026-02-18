@@ -1,0 +1,15 @@
+=========================================
+Job: kinGEMs Fluxomics Validation Pipeline
+Job ID: 22508197
+Node: fc30609
+Current working directory: /project/def-mahadeva/ranaab/kinGEMs_v2
+Starting run at: Tue Feb 10 11:09:00 PST 2026
+=========================================
+Using configuration: configs/fluxomics_iML1515_GEM.json
+Using experimental data: data/experimental/crown_fluxomics_final.csv
+
+CPUs allocated: 8
+
+Configuration: configs/fluxomics_iML1515_GEM.json
+Experimental data: data/experimental/crown_fluxomics_final.csv
+Running fluxomics validation (config mode)...

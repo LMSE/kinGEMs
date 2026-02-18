@@ -659,9 +659,53 @@ def retrieve_sequences(model, organism, output_path=None):
                 genes.append(gene)
         return genes
 
+    def get_BiGG_sequence(gene, model_id):
+        """
+        Query BiGG API for gene sequence.
+
+        Parameters
+        ----------
+        gene : str
+            Gene ID to query
+        model_id : str
+            BiGG model ID
+
+        Returns
+        -------
+        str or None
+            Protein sequence if found, None otherwise
+        """
+        if not gene or not model_id:
+            return None
+
+        try:
+            import requests
+            import time
+
+            url = f"http://bigg.ucsd.edu/api/v2/models/{model_id}/genes/{gene}"
+            response = requests.get(url, timeout=10)
+            time.sleep(0.1)  # Rate limit: be nice to BiGG API
+
+            if response.status_code == 200:
+                data = response.json()
+                sequence = data.get('protein_sequence', '').strip()
+
+                if sequence and sequence != " ":  # BiGG sometimes returns single space
+                    return sequence
+                else:
+                    logging.debug(f"No protein sequence in BiGG for gene {gene}")
+                    return None
+            else:
+                logging.debug(f"BiGG API returned {response.status_code} for gene {gene}")
+                return None
+
+        except Exception as e:
+            logging.debug(f"Error querying BiGG for gene {gene}: {e}")
+            return None
+
     def get_UniProt_sequence(gene):
         """
-        Query UniProt for gene sequence.
+        Query UniProt for gene sequence, with BiGG fallback.
 
         Parameters
         ----------
@@ -682,7 +726,12 @@ def retrieve_sequences(model, organism, output_path=None):
 
             # Validate result
             if not result:
-                logging.warning(f"No sequence found for gene {gene}")
+                logging.warning(f"No sequence found in UniProt for gene {gene}, trying BiGG...")
+                # Fallback to BiGG
+                bigg_seq = get_BiGG_sequence(gene, model.id)
+                if bigg_seq:
+                    logging.info(f"Found sequence in BiGG for gene {gene}")
+                    return bigg_seq
                 return None
 
             # Extract sequence from FASTA format
@@ -691,24 +740,44 @@ def retrieve_sequences(model, organism, output_path=None):
 
             # Additional validation
             if not sequence:
-                logging.warning(f"Empty sequence retrieved for gene {gene}")
+                logging.warning(f"Empty sequence from UniProt for gene {gene}, trying BiGG...")
+                # Fallback to BiGG
+                bigg_seq = get_BiGG_sequence(gene, model.id)
+                if bigg_seq:
+                    logging.info(f"Found sequence in BiGG for gene {gene}")
+                    return bigg_seq
                 return None
 
             return sequence
 
         except urllib.error.URLError as url_err:
             # Network-related errors
-            logging.warning(f"Network error retrieving sequence for {gene}: {url_err}")
+            logging.warning(f"Network error retrieving sequence from UniProt for {gene}: {url_err}, trying BiGG...")
+            # Fallback to BiGG
+            bigg_seq = get_BiGG_sequence(gene, model.id)
+            if bigg_seq:
+                logging.info(f"Found sequence in BiGG for gene {gene}")
+                return bigg_seq
             return None
 
         except AttributeError as attr_err:
             # Potential issues with service or method
             logging.error(f"Attribute error for gene {gene}: {attr_err}", exc_info=True)
+            # Fallback to BiGG
+            bigg_seq = get_BiGG_sequence(gene, model.id)
+            if bigg_seq:
+                logging.info(f"Found sequence in BiGG for gene {gene}")
+                return bigg_seq
             return None
 
         except Exception as e:
             # Catch any other unexpected errors
             logging.error(f"Unexpected error retrieving sequence for {gene}: {e}", exc_info=True)
+            # Fallback to BiGG
+            bigg_seq = get_BiGG_sequence(gene, model.id)
+            if bigg_seq:
+                logging.info(f"Found sequence in BiGG for gene {gene}")
+                return bigg_seq
             return None
 
     # Create dataframe with all genes

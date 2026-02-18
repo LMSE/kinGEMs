@@ -633,46 +633,75 @@ def run_optimization(
         solutions = []
         
         if actual_solver == 'gurobi':
-            # Gurobi stores solutions in the solution pool
+            # Use Pyomo's built-in Gurobi solution pool interface
             try:
-                # Access solution pool through the model
-                m.solutions.load_from(result)
-                num_found = result.solution.pool.num_solutions
+                from pyomo.contrib.alternative_solutions.solnpool import gurobi_generate_solutions
                 
+                print(f"[SOLUTION POOL] Using Pyomo's gurobi_generate_solutions to find {num_solutions} solutions...")
+                
+                # Generate alternative solutions using Pyomo's interface
+                pyomo_solutions = gurobi_generate_solutions(
+                    m,
+                    num_solutions=num_solutions,
+                    rel_opt_gap=solution_pool_gap,
+                    abs_opt_gap=None,
+                    solver_options={'FeasibilityTol': 1e-9, 'OptimalityTol': 1e-9},
+                    tee=tee
+                )
+                
+                num_found = len(pyomo_solutions)
+                print(f"[SOLUTION POOL] Found {num_found} solutions")
+                
+                if num_found == 0:
+                    print("⚠️  WARNING: No solutions in pool, returning single optimal solution")
+                    num_solutions = 1
+                elif num_found == 1:
+                    print("⚠️  WARNING: Only 1 solution found. Try increasing PoolGap or the problem may be highly constrained")
+                    num_solutions = 1
+                else:
+                    # Extract each solution
+                    for sol_idx, pyomo_sol in enumerate(pyomo_solutions):
+                        # Get objective value
+                        sol_val = pyomo_sol.objective[m.obj]
+                        
+                        # Extract variable values for this solution
+                        records = []
+                        for r in m.R:
+                            flux_val = pyomo_sol.variable[m.v[r]]
+                            
+                            # Post-process - handle numerical precision
+                            if abs(flux_val) < 1e-10:
+                                flux_val = 0.0
+                            flux_val = max(min(flux_val, ub[r]), lb[r])
+                            
+                            records.append(('flux', r, flux_val, f"[{lb[r]}, {ub[r]}]"))
+                        
+                        for g in m.G:
+                            enzyme_val = pyomo_sol.variable[m.E[g]]
+                            
+                            if abs(enzyme_val) < 1e-10:
+                                enzyme_val = 0.0
+                            enzyme_val = max(enzyme_val, 0.0)
+                            
+                            records.append(('enzyme', g, enzyme_val, None))
+                        
+                        df_FBA = pd.DataFrame(records, columns=['Variable', 'Index', 'Value', 'Bounds'])
+                        solutions.append((sol_val, df_FBA))
+                        
+                        if verbose:
+                            print(f"  Solution {sol_idx + 1}/{num_found}: objective = {sol_val:.6f}")
+                
+            except ImportError as e:
                 if verbose:
-                    print(f"[SOLUTION POOL] Found {num_found} solutions")
-                
-                for sol_idx in range(min(num_found, num_solutions)):
-                    # Load each solution
-                    m.solutions.select(sol_idx)
-                    
-                    # Post-process - handle numerical precision issues
-                    tolerance = 1e-10
-                    for r in m.R:
-                        val = m.v[r].value if m.v[r].value is not None else lb[r]
-                        if abs(val) < tolerance:
-                            val = 0.0
-                        m.v[r].value = max(min(val, ub[r]), lb[r])
-                    for g in m.G:
-                        val = m.E[g].value if m.E[g].value is not None else 0.0
-                        if abs(val) < tolerance:
-                            val = 0.0
-                        m.E[g].value = max(val, 0.0)
-                    
-                    # Collect results for this solution
-                    sol_val = value(m.obj)
-                    records = [('flux', r, m.v[r].value, f"[{lb[r]}, {ub[r]}]") for r in m.R]
-                    records += [('enzyme', g, m.E[g].value, None) for g in m.G]
-                    df_FBA = pd.DataFrame(records, columns=['Variable','Index','Value', 'Bounds'])
-                    
-                    solutions.append((sol_val, df_FBA))
-                    
-                    if verbose:
-                        print(f"  Solution {sol_idx + 1}: objective = {sol_val:.6f}")
-                
+                    print(f"⚠️  WARNING: Could not import Pyomo's alternative_solutions module: {e}")
+                    print("  Make sure you have pyomo.contrib.alternative_solutions installed.")
+                    print("  Returning single optimal solution instead.")
+                num_solutions = 1
             except Exception as e:
                 if verbose:
                     print(f"⚠️  WARNING: Could not extract solution pool: {e}")
+                    import traceback
+                    traceback.print_exc()
                     print("  Returning single optimal solution instead.")
                 # Fall back to single solution
                 num_solutions = 1
