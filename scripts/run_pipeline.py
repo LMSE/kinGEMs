@@ -555,10 +555,18 @@ def run_pipeline_core(
     log("  Generating per-subsystem kcat comparison plot...")
     kcat_subsystem_plot_path = os.path.join(output_dir, "kcat_comparison_by_subsystem.png")
     try:
-        sub_map = {
-            r.id: (r.subsystem if r.subsystem else 'Unknown')
-            for r in model.reactions
-        }
+        sub_map = {}
+        for r in model.reactions:
+            subsystem = r.subsystem if r.subsystem else 'Unknown'
+            sub_map[r.id] = subsystem
+            # Also map the original (pre-irreversible) ID so reactions like
+            # "PFK_forward" / "PFK_reverse" resolve for rows keyed as "PFK"
+            base_id = r.id
+            for suffix in ('_forward', '_reverse', '_f', '_r'):
+                if base_id.endswith(suffix):
+                    base_id = base_id[: -len(suffix)]
+                    break
+            sub_map.setdefault(base_id, subsystem)
         df_new_sub = df_new.copy()
         df_new_sub['subsystem'] = df_new_sub['Reactions'].map(sub_map).fillna('Unknown')
         initial_df_sub = processed_data.copy()

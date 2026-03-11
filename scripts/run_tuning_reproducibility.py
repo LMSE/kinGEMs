@@ -448,7 +448,16 @@ def main():
     )
 
     # ---- Attach subsystem column from model reactions ----
-    rxn_subsystem = {r.id: (r.subsystem if r.subsystem else 'Other') for r in model.reactions}
+    rxn_subsystem = {}
+    for r in model.reactions:
+        subsystem = r.subsystem if r.subsystem else 'Other'
+        rxn_subsystem[r.id] = subsystem
+        base_id = r.id
+        for suffix in ('_forward', '_reverse', '_f', '_r'):
+            if base_id.endswith(suffix):
+                base_id = base_id[: -len(suffix)]
+                break
+        rxn_subsystem.setdefault(base_id, subsystem)
     if 'Reactions' in processed_data.columns:
         processed_data = processed_data.copy()
         processed_data['subsystem'] = processed_data['Reactions'].map(rxn_subsystem).fillna('Other')

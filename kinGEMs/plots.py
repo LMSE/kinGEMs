@@ -804,11 +804,25 @@ def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
     gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3,
                           width_ratios=[1, 1, 0.85])
 
-    # 1. Scatter plot: Initial vs Tuned
+    # 1. Scatter plot: Initial vs Tuned — colored by log2 fold change
     ax1 = fig.add_subplot(gs[0, :2])
 
-    ax1.scatter(merged['kcat_mean'], merged['kcat_updated'],
-                alpha=0.6, s=50, color='#1f77b4')
+    from matplotlib.colors import TwoSlopeNorm
+    log2_fc = np.log2(fold_changes.clip(lower=1e-10))
+    # Symmetric color limits at the 2nd/98th percentile so extremes don't wash out the gradient
+    vlim = np.nanpercentile(np.abs(log2_fc), 98)
+    vlim = max(vlim, 0.5)   # at least ±0.5 log2 range
+    norm = TwoSlopeNorm(vcenter=0, vmin=-vlim, vmax=vlim)
+
+    sc = ax1.scatter(merged['kcat_mean'], merged['kcat_updated'],
+                     c=log2_fc, cmap='PuOr_r', norm=norm,
+                     alpha=0.7, s=50, linewidths=0)
+
+    cbar = plt.colorbar(sc, ax=ax1, pad=0.01, fraction=0.03)
+    cbar.set_label('log₂(tuned / initial)', fontsize=FONT_SIZES['legend'])
+    cbar.ax.tick_params(labelsize=FONT_SIZES['tick_label'])
+    # Mark the zero line on the colorbar
+    cbar.ax.axhline(0, color='black', linewidth=1, linestyle='--')
 
     # Add diagonal line (y=x)
     lims = [
