@@ -139,6 +139,7 @@ def main():
     fva_method = fva_config.get('method', 'dask')
     chunk_size = fva_config.get('chunk_size', None)
     constrain_biomass = not args.no_biomass_constraint  # Invert flag for parameter
+    solver_name = config.get('solver', 'glpk')
 
     # Generate run ID
     run_id = f"{model_name}_FVA_ablation_{datetime.today().strftime('%Y%m%d')}_{random.randint(1000, 9999)}"
@@ -161,6 +162,7 @@ def main():
     print(f"Organism: {organism}")
     print(f"Enzyme upper bound: {enzyme_upper_bound}")
     print(f"Constrain biomass: {constrain_biomass}")
+    print(f"Solver: {solver_name}")
     print(f"Parallel FVA: {use_parallel}")
     if use_parallel:
         print(f"Workers: {n_workers or 'auto'}")
@@ -172,6 +174,7 @@ def main():
     # Load model and data
     print("\n=== Loading Model and Data ===")
     model = load_model(model_path)
+    model.solver = solver_name
 
     # Determine biomass reaction
     obj_rxns = {rxn.id: rxn.objective_coefficient
@@ -216,12 +219,15 @@ def main():
     # Convert model to irreversible for all computations
     # ===================================================================
     model = convert_to_irreversible(model)
+    model.solver = solver_name  # Re-apply after conversion
 
     # ===================================================================
     # Level 1: Baseline GEM (Irreversible, no enzyme constraints)
     # ===================================================================
     print("\n=== Level 1: Baseline GEM (irreversible, no enzyme constraints) ===")
-    fva_results_irrev = cobra_fva(model, fraction_of_optimum=0.9)
+    l1_opt_ratio = 0.9 if constrain_biomass else 0.0
+    print(f"  fraction_of_optimum={l1_opt_ratio} (constrain_biomass={constrain_biomass})")
+    fva_results_irrev = cobra_fva(model, fraction_of_optimum=l1_opt_ratio)
 
     fva_df = pd.DataFrame({
         'Reactions': fva_results_irrev.index,

@@ -578,7 +578,7 @@ def run_pipeline_core(
             output_path=kcat_subsystem_plot_path,
             model_name=model_name,
             max_subsystems=12,
-            ncols=4,
+            ncols=3,
             show=False,
         )
         log(f"  Saved per-subsystem kcat comparison plot: {kcat_subsystem_plot_path}")
@@ -1032,7 +1032,7 @@ def main():
                     output_path=sub_plot_path,
                     model_name=model_name,
                     max_subsystems=12,
-                    ncols=4,
+                    ncols=3,
                     show=False,
                 )
                 print(f"  Saved: {sub_plot_path}")

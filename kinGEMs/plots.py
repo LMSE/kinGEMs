@@ -833,8 +833,8 @@ def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
 
     ax1.set_xscale('log')
     ax1.set_yscale('log')
-    ax1.set_xlabel('Initial kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
-    ax1.set_ylabel('Post-Annealing kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
+    ax1.set_xlabel('Initial kcat (1/hr)', fontsize=FONT_SIZES['axis_label']+2)
+    ax1.set_ylabel('Post-Annealing kcat (1/hr)', fontsize=FONT_SIZES['axis_label']+2)
     title = 'Initial vs Post-Annealing kcat Values'
     if model_name:
         title = f'{model_name}: {title}'
@@ -865,8 +865,8 @@ def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
     ax2.axvline(initial_median, color='#8c564b', linestyle='--', linewidth=2.5, label=f'Median: {initial_median:.1f}')
     ax2.set_xscale('log')
     ax2.set_xlim(shared_xmin, shared_xmax)
-    ax2.set_xlabel('kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
-    ax2.set_ylabel('Density', fontsize=FONT_SIZES['axis_label'])
+    ax2.set_xlabel('kcat (1/hr)', fontsize=FONT_SIZES['axis_label']+2)
+    ax2.set_ylabel('Density', fontsize=FONT_SIZES['axis_label']+2)
     ax2.set_title('Initial kcat Distribution', fontsize=FONT_SIZES['subtitle'])
     ax2.legend(fontsize=FONT_SIZES['legend'], loc='upper center', bbox_to_anchor=(0.35, -0.15), ncol=2)
     ax2.grid(True, alpha=0.3, axis='y')
@@ -883,8 +883,8 @@ def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
     ax3.axvline(tuned_median, color='#e377c2', linestyle='--', linewidth=2.5, label=f'Median: {tuned_median:.1f}')
     ax3.set_xscale('log')
     ax3.set_xlim(shared_xmin, shared_xmax)
-    ax3.set_xlabel('kcat (1/hr)', fontsize=FONT_SIZES['axis_label'])
-    ax3.set_ylabel('Density', fontsize=FONT_SIZES['axis_label'])
+    ax3.set_xlabel('kcat (1/hr)', fontsize=FONT_SIZES['axis_label']+2)
+    ax3.set_ylabel('Density', fontsize=FONT_SIZES['axis_label']+2)
     ax3.set_title('Post-Annealing kcat Distribution', fontsize=FONT_SIZES['subtitle'])
     ax3.legend(fontsize=FONT_SIZES['legend'], loc='upper center', bbox_to_anchor=(0.65, -0.15), ncol=2)
     ax3.grid(True, alpha=0.3, axis='y')
@@ -927,8 +927,8 @@ def plot_kcat_annealing_comparison(initial_df, tuned_df, output_path=None,
 
 def plot_kcat_annealing_comparison_by_subsystem(
         initial_df, tuned_df, subsystem_col,
-        output_path=None, figsize=(20, 16), show=False,
-        model_name=None, max_subsystems=12, ncols=4):
+        output_path=None, figsize=(18, 24), show=False,
+        model_name=None, max_subsystems=12, ncols=3):
     """
     Compare initial and post-annealing kcat values in a grid of scatter subplots,
     one panel per metabolic subsystem.
@@ -989,32 +989,35 @@ def plot_kcat_annealing_comparison_by_subsystem(
         print("Warning: No matching kcat values found between initial and tuned datasets")
         return None
 
-    # Group rare subsystems into "Other"
+    # Merge "Unknown" into the catch-all group
+    merged[subsystem_col] = merged[subsystem_col].replace({'Unknown': 'Unknown / Other'})
+
+    # Group rare subsystems into "Unknown / Other"
     top_subs = (
         merged[subsystem_col]
         .value_counts()
+        .drop(labels=['Unknown / Other'], errors='ignore')
         .head(max_subsystems)
         .index.tolist()
     )
     merged['_sub_label'] = merged[subsystem_col].where(
-        merged[subsystem_col].isin(top_subs), other='Other'
+        merged[subsystem_col].isin(top_subs), other='Unknown / Other'
     )
 
-    # Plot order: top subsystems by count, "Other" at end
+    # Plot order: top subsystems by count, exclude "Unknown / Other"
     sub_counts = merged['_sub_label'].value_counts()
     groups = [s for s in top_subs if s in sub_counts.index]
-    if 'Other' in sub_counts.index:
-        groups.append('Other')
 
     n_groups = len(groups)
     nrows = int(np.ceil(n_groups / ncols))
 
-    # Colour palette: tab20 for named subsystems, grey for Other
+    # Colour palette: tab20 for named subsystems, grey for Unknown / Other
     tab20 = plt.cm.get_cmap('tab20', len(top_subs) + 1)
     palette = {sub: tab20(i) for i, sub in enumerate(top_subs)}
-    palette['Other'] = (0.6, 0.6, 0.6, 1.0)
+    palette['Unknown / Other'] = (0.6, 0.6, 0.6, 1.0)
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False,
+                             gridspec_kw={'hspace': 0.15, 'wspace': 0.2})
 
     # Shared axis limits across all panels
     all_vals = pd.concat([merged['kcat_mean'], merged['kcat_updated']]).dropna()
@@ -1028,7 +1031,7 @@ def plot_kcat_annealing_comparison_by_subsystem(
         ax = axes[row][col]
 
         grp = merged[merged['_sub_label'] == sub]
-        color = palette.get(sub, palette['Other'])
+        color = palette.get(sub, palette['Unknown / Other'])
 
         ax.scatter(
             grp['kcat_mean'], grp['kcat_updated'],
@@ -1043,13 +1046,13 @@ def plot_kcat_annealing_comparison_by_subsystem(
         ax.set_xlim(lims)
         ax.set_ylim(lims)
         ax.grid(True, alpha=0.3)
-        ax.set_title(
-            f'{sub}\n(n={len(grp):,})',
-            fontsize=FONT_SIZES['annotation'],
-            fontweight='bold',
-            pad=4
-        )
-        ax.tick_params(labelsize=FONT_SIZES['tick_label'] - 2)
+        # Place title inside the axes so it never overlaps with adjacent tick labels
+        ax.text(0.5, 0.97, f'{sub}\n(n={len(grp):,})',
+                transform=ax.transAxes,
+                ha='center', va='top',
+                fontsize=16, fontweight='bold',
+                bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
+        ax.tick_params(labelsize=15)
 
     # Hide unused axes
     for idx in range(n_groups, nrows * ncols):
@@ -1057,15 +1060,18 @@ def plot_kcat_annealing_comparison_by_subsystem(
         axes[row][col].set_visible(False)
 
     # Shared axis labels
-    fig.supxlabel('Initial kcat (1/hr)', fontsize=FONT_SIZES['axis_label'], y=0.01)
-    fig.supylabel('Post-Annealing kcat (1/hr)', fontsize=FONT_SIZES['axis_label'], x=0.01)
+    fig.supxlabel('Initial kcat (1/hr)', fontsize=22, fontweight='bold', y=0.01)
+    fig.supylabel('Post-Annealing kcat (1/hr)', fontsize=22, fontweight='bold', x=0.01)
 
     suptitle = 'Initial vs Post-Annealing kcat by Subsystem'
     if model_name:
         suptitle = f'{model_name}: {suptitle}'
-    fig.suptitle(suptitle, fontsize=FONT_SIZES['title'], fontweight='bold', y=1.01)
+    fig.suptitle(suptitle, fontsize=FONT_SIZES['title']+5, fontweight='bold', y=0.98)
 
-    plt.tight_layout()
+    # Use subplots_adjust instead of tight_layout so sup labels and suptitle
+    # are properly accounted for (tight_layout ignores them)
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.95, bottom=0.05,
+                        hspace=0.35, wspace=0.45)
 
     if output_path:
         ensure_dir_exists(os.path.dirname(output_path))
@@ -1821,8 +1827,9 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
         x_max = max(all_fvi_values)
         ax1.set_xlim(max(x_min, 1e-5), x_max)  # Add some padding
     ax1.set_ylim(0, 1)
-    ax1.set_xlabel('Flux Variability (FVi)', fontsize=13, weight='bold')
-    ax1.set_ylabel('Cumulative Probability', fontsize=13, weight='bold')
+    ax1.set_xlabel('Flux Variability (FVi)', fontsize=19, weight='bold')
+    ax1.set_ylabel('Cumulative Probability', fontsize=19, weight='bold')
+    ax1.tick_params(axis='both', labelsize=17)
     ax1.set_title(f'{model_name}: Cumulative Flux Variability Distribution', fontsize=16, fontweight='bold')
     ax1.legend(loc=legend_position, fontsize=12)
     ax1.grid(True, alpha=0.3)
@@ -1839,17 +1846,19 @@ def plot_fva_ablation_cumulative(fva_results_dict, biomass_dict, model_name,
         bars = ax2.bar(x_pos, median_fvis, color=[FVA_LEVEL_COLORS.get(label, '#1f77b4') for label in labels], alpha=0.7)
 
         # Set up left y-axis for Median FVi
-        ax2.set_ylabel('Median FVi', fontsize=FONT_SIZES['axis_label'])
+        ax2.set_ylabel('Median FVi', fontsize=FONT_SIZES['axis_label'] + 4, weight='bold')
         ax2.set_yscale('log')
         ax2.set_ylim(bottom=1e-2)
+        ax2.tick_params(axis='y', labelsize=FONT_SIZES['tick_label'] + 4)
         ax2.set_xticks(x_pos)
-        ax2.set_xticklabels([label.replace('Level ', 'L').replace(': ', '\n') for label in labels],
-                           rotation=45, ha='right', fontsize=FONT_SIZES['annotation'])
+        ax2.set_xticklabels([label.replace('Level ', 'L').split(':')[0].strip() for label in labels],
+                           rotation=0, ha='center', fontsize=FONT_SIZES['tick_label'] + 4)
 
         # Create second y-axis for biomass
         ax2_biomass = ax2.twinx()
         line = ax2_biomass.plot(x_pos, biomass_values, 'ko-', linewidth=2, markersize=6, label='Biomass')
-        ax2_biomass.set_ylabel('Biomass (1/hr)', fontsize=FONT_SIZES['axis_label'])
+        ax2_biomass.set_ylabel('Biomass (1/hr)', fontsize=FONT_SIZES['axis_label'] + 4, weight='bold')
+        ax2_biomass.tick_params(axis='y', labelsize=FONT_SIZES['tick_label'] + 4)
         ax2_biomass.set_ylim(0, max(biomass_values) * 1.1)
 
         # Add subplot title
@@ -2610,6 +2619,9 @@ def plot_fva_mfa_comparison_normalized(
         raise ValueError(f"Master dataframe missing columns: {missing}")
 
     master_df = master_df.dropna(subset=['mfa_lb', 'mfa_ub'])
+    # Exclude biomass reactions
+    mask_biomass = master_df['rxn_id'].str.contains('biomass', case=False, na=False)
+    master_df = master_df[~mask_biomass]
     all_reactions = master_df['rxn_id'].unique()
 
     # Normalization factors per rxn
@@ -2636,17 +2648,16 @@ def plot_fva_mfa_comparison_normalized(
     mfa_offset = -0.4 + step_size / 2
     model_offsets = [mfa_offset + (i + 1) * step_size for i in range(num_models)]
 
-    # Chunking
-    chunks = [all_reactions]
-    if split_charts and len(all_reactions) > reactions_per_plot:
-        chunks = [all_reactions[i:i + reactions_per_plot]
-                  for i in range(0, len(all_reactions), reactions_per_plot)]
-        print(f"Splitting visualization into {len(chunks)} plots.")
+    # Split reactions into two halves for side-by-side subplots
+    all_rxns_list = list(all_reactions)
+    half = (len(all_rxns_list) + 1) // 2  # ceiling division
+    left_rxns  = all_rxns_list[:half]
+    right_rxns = all_rxns_list[half:]
 
-    for chunk_idx, rxn_chunk in enumerate(chunks):
-        fig_height = len(rxn_chunk) * 0.5 + 2
-        fig, ax = plt.subplots(figsize=(12, fig_height))
+    fig_height = half * 0.5 + 2
+    fig, axes = plt.subplots(1, 2, figsize=(16, fig_height))
 
+    def _draw_panel(ax, rxn_chunk, add_legend=False):
         for i, rxn in enumerate(rxn_chunk):
             if rxn not in normalization_factors:
                 continue
@@ -2682,7 +2693,6 @@ def plot_fva_mfa_comparison_normalized(
                 fva_lb_norm = (fva_lb - norm_offset) / norm_factor
                 fva_ub_norm = (fva_ub - norm_offset) / norm_factor
 
-                # Clamp drawn segment to avoid huge off-screen lines
                 draw_min = max(fva_lb_norm, -zoom_limit * 1.5)
                 draw_max = min(fva_ub_norm,  zoom_limit * 1.5)
 
@@ -2697,34 +2707,35 @@ def plot_fva_mfa_comparison_normalized(
                     label=label if i == 0 else ""
                 )
 
-        # Formatting
+        # Formatting — consistent x-axis across both panels
         ax.set_xlim(-zoom_limit, zoom_limit)
         ax.set_yticks(range(len(rxn_chunk)))
-        ax.set_yticklabels(rxn_chunk, fontsize=FONT_SIZES['tick_label'], fontfamily='monospace')
+        ax.set_yticklabels(rxn_chunk, fontsize=FONT_SIZES['tick_label'] + 3, fontfamily='monospace')
+        ax.tick_params(axis='x', labelsize=FONT_SIZES['tick_label'] + 3)
         ax.invert_yaxis()
-        ax.set_xlabel('Normalized Deviation (Units of MFA Range Width)', fontsize=FONT_SIZES['axis_label'])
-        ax.set_title('MFA vs FVA: Normalized Deviations', fontsize=FONT_SIZES['title'])
+        ax.set_xlabel('Normalized Deviation (Units of MFA Range Width)', fontsize=FONT_SIZES['axis_label'] + 3)
         ax.grid(axis='x', linestyle='--', alpha=0.5)
 
-        handles = [mlines.Line2D([], [], color='black', linewidth=5, label='MFA Range')]
-        for label, _ in ordered_models:
-            handles.append(mlines.Line2D([], [], color=model_color_map.get(label, '#777777'), linewidth=4, label=label))
-        ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=FONT_SIZES['legend'])
+        if add_legend:
+            handles = [mlines.Line2D([], [], color='black', linewidth=5, label='MFA Range')]
+            for label, _ in ordered_models:
+                handles.append(mlines.Line2D([], [], color=model_color_map.get(label, '#777777'), linewidth=4, label=label))
+            ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=FONT_SIZES['legend'] - 1, framealpha=0.5)
 
-        plt.tight_layout()
+    _draw_panel(axes[0], left_rxns,  add_legend=False)
+    _draw_panel(axes[1], right_rxns, add_legend=True)
 
-        # Save
-        if output_path:
-            base, ext = os.path.splitext(output_path)
-            ext = ext or ".png"
-            chunk_path = f"{base}_part{chunk_idx+1:02d}{ext}" if len(chunks) > 1 else output_path
-            _safe_ensure_dir_for_file(chunk_path)
-            plt.savefig(chunk_path, dpi=DEFAULT_DPI, bbox_inches='tight')
+    fig.suptitle('MFA vs FVA: Normalized Deviations', fontsize=FONT_SIZES['title'] + 3, fontweight='bold')
+    plt.tight_layout()
 
-        if show:
-            plt.show()
-        else:
-            plt.close(fig)
+    if output_path:
+        _safe_ensure_dir_for_file(output_path)
+        plt.savefig(output_path, dpi=DEFAULT_DPI, bbox_inches='tight')
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 def plot_fva_mfa_comparison_zoom_with_jaccard_table(
     models_data: dict[str, pd.DataFrame],
@@ -2865,7 +2876,8 @@ def plot_fva_mfa_comparison_zoom_with_jaccard_table(
 
     # ---- Y formatting ----
     ax.set_yticks([i * band_height + 0.5 * band_height for i in range(len(rxn_ids))])
-    ax.set_yticklabels(rxn_ids, fontsize=FONT_SIZES['tick_label'], fontfamily='monospace')
+    ax.set_yticklabels(rxn_ids, fontsize=FONT_SIZES['tick_label'] + 2, fontfamily='monospace')
+    ax.tick_params(axis='both', labelsize=FONT_SIZES['tick_label'] + 2)
     ax.set_ylim(0, len(rxn_ids) * band_height)
     ax.invert_yaxis()
 
@@ -2873,8 +2885,8 @@ def plot_fva_mfa_comparison_zoom_with_jaccard_table(
         ax.axhline(i * band_height, color='black', linewidth=1, alpha=0.18, zorder=0)
 
     # ---- X formatting ----
-    ax.set_xlabel('Flux (mmol/gDW/h)', fontsize=FONT_SIZES['axis_label'])
-    ax.set_title('MFA vs FVA Range Comparison', fontsize=FONT_SIZES['title'])
+    ax.set_xlabel('Flux (mmol/gDW/h)', fontsize=FONT_SIZES['axis_label'] + 2)
+    ax.set_title('MFA vs FVA Range Comparison', fontsize=FONT_SIZES['title'] + 2)
     ax.grid(False)
 
     # xlim start at 0, pad on right
@@ -3046,7 +3058,7 @@ def plot_fva_mfa_comparison_zoom(
 
     # ---- Y formatting ----
     ax.set_yticks([i * band_height + 0.5 * band_height for i in range(len(rxn_ids))])
-    ax.set_yticklabels(rxn_ids, fontsize=FONT_SIZES['tick_label'], fontfamily='monospace')
+    ax.set_yticklabels(rxn_ids, fontsize=FONT_SIZES['tick_label']+4, fontfamily='monospace')
     ax.set_ylim(0, len(rxn_ids) * band_height)
     ax.invert_yaxis()
 
@@ -3055,8 +3067,9 @@ def plot_fva_mfa_comparison_zoom(
         ax.axhline(i * band_height, color='black', linewidth=1, alpha=0.18, zorder=0)
 
     # ---- X formatting ----
-    ax.set_xlabel('Flux (mmol/gDW/h)', fontsize=FONT_SIZES['axis_label'])
-    ax.set_title('MFA vs FVA Range Comparison', fontsize=FONT_SIZES['title'])
+    ax.set_xlabel('Flux (mmol/gDW/h)', fontsize=FONT_SIZES['axis_label'] + 4)
+    ax.set_title('MFA vs FVA Range Comparison', fontsize=FONT_SIZES['title'] + 2)
+    ax.tick_params(axis='x', labelsize=FONT_SIZES['tick_label'] + 2)
     ax.grid(False)
 
     # xlim start at 0, modest right pad (no extra pad for text now)
@@ -3075,7 +3088,7 @@ def plot_fva_mfa_comparison_zoom(
                     linewidth=lw_fva, label=label
                 )
             )
-        ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=FONT_SIZES['legend'])
+        ax.legend(handles=handles, loc='upper right', frameon=True, fontsize=FONT_SIZES['legend'] - 1)
 
     plt.tight_layout()
 
@@ -3624,8 +3637,11 @@ def plot_mean_to_mean_distance_stacked(
     all_vals = [v for sub in dists_list for v in sub]
     ymax = max(0.1, (max(all_vals) * 1.15) if all_vals else 0.1)
     ax_d.set_ylim(0, ymax)
-    ax_d.set_ylabel("Distance [mmol/gDCW/hr] (↓ better)", fontsize=FONT_SIZES["axis_label"], loc="center", weight="bold")
-    ax_d.set_title("Mean-to-Mean Distance", fontsize=FONT_SIZES["subtitle"], loc="center", pad=12, weight="bold")
+    ax_d.set_ylabel("Flux [mmol/gDCW/hr]", fontsize=FONT_SIZES["axis_label"] + 2, loc="center", weight="bold")
+    ax_d.set_title("Mean-to-Mean Distance", fontsize=FONT_SIZES["subtitle"] + 2, loc="center", pad=12, weight="bold")
+    ax_d.tick_params(axis='y', labelsize=FONT_SIZES["tick_label"] + 2)
+    ax_d.text(0, 1.01, "↓ better", transform=ax_d.transAxes,
+              fontsize=FONT_SIZES["legend"], ha="left", va="bottom", style="italic", color="#555555")
     ax_d.grid(axis="y", linestyle="--", alpha=0.25)
 
     rng = np.random.default_rng(0)
@@ -3644,7 +3660,7 @@ def plot_mean_to_mean_distance_stacked(
         ax_d.text(
             x[i], y_text, f"{mean_v:.3f}",
             ha="center", va="bottom",
-            fontsize=FONT_SIZES["annotation"], weight="bold", zorder=6
+            fontsize=FONT_SIZES["annotation"] + 2, weight="bold", zorder=6
         )
 
     # --- Bottom: # Disjoint Reactions bar chart ---
@@ -3657,8 +3673,11 @@ def plot_mean_to_mean_distance_stacked(
         linewidth=1
     )
 
-    ax_z.set_ylabel("Count (↓ better)", fontsize=FONT_SIZES["axis_label"], loc="center", weight="bold")
-    ax_z.set_title("Disjoint Reactions", fontsize=FONT_SIZES["subtitle"], loc="center", pad=12, weight="bold")
+    ax_z.set_ylabel("Count", fontsize=FONT_SIZES["axis_label"] + 2, loc="center", weight="bold")
+    ax_z.set_title("Number of Disjoint Reactions", fontsize=FONT_SIZES["subtitle"] + 2, loc="center", pad=12, weight="bold")
+    ax_z.tick_params(axis='y', labelsize=FONT_SIZES["tick_label"] + 2)
+    ax_z.text(0, 1.01, "↓ better", transform=ax_z.transAxes,
+              fontsize=FONT_SIZES["legend"], ha="left", va="bottom", style="italic", color="#555555")
     ax_z.grid(axis="y", linestyle="--", alpha=0.3)
 
     max_z = max(zero_overlaps_list) if zero_overlaps_list else 1
@@ -3668,11 +3687,11 @@ def plot_mean_to_mean_distance_stacked(
         h = bar.get_height()
         ax_z.text(
             bar.get_x() + bar.get_width() / 2, h, f"{int(h)}",
-            ha="center", va="bottom", fontsize=FONT_SIZES["annotation"], weight="bold"
+            ha="center", va="bottom", fontsize=FONT_SIZES["annotation"] + 2, weight="bold"
         )
 
     ax_z.set_xticks(x)
-    ax_z.set_xticklabels(mapped_names, fontsize=FONT_SIZES["tick_label"], rotation=0)
+    ax_z.set_xticklabels(mapped_names, fontsize=FONT_SIZES["tick_label"] + 1, rotation=0)
 
     # --- Title ---
     # fig.suptitle(
